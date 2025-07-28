@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "santri" ALTER COLUMN "phone" SET DATA TYPE VARCHAR(50);

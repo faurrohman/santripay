@@ -1,0 +1,203 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  email     String   @unique
+  password  String
+  role      Role     @default(santri)
+  receiveAppNotifications Boolean @default(true)
+  receiveEmailNotifications Boolean @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  santri    Santri?
+  notifikasi Notifikasi[]
+
+  @@map("users")
+}
+
+model Santri {
+  id        String    @id @default(uuid())
+  userId    String    @unique @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  santriId  String    @unique @map("santri_id")
+  kelasId   String    @map("kelas_id")
+  kelas     Kelas     @relation(fields: [kelasId], references: [id], onDelete: Cascade)
+  phone     String?   @db.VarChar(50)
+  namaBapak String?
+  namaIbu   String?
+  alamat    String?
+  tagihan   Tagihan[]
+  transaksi Transaksi[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  riwayatKelas RiwayatKelas[]
+
+  @@map("santri")
+}
+
+model TahunAjaran {
+  id        String   @id @default(uuid())
+  name      String   // Contoh: "2023/2024"
+  aktif     Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  kelas     Kelas[]
+  tagihan   Tagihan[]
+}
+
+model Kelas {
+  id            String        @id @default(uuid())
+  name          String
+  level         String?
+  tahunAjaranId String
+  tahunAjaran   TahunAjaran   @relation(fields: [tahunAjaranId], references: [id])
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  santri        Santri[]
+  kelasLama     RiwayatKelas[] @relation("KelasLama")
+  kelasBaru     RiwayatKelas[] @relation("KelasBaru")
+
+  @@map("kelas")
+}
+
+model Tagihan {
+  id            String          @id @default(uuid())
+  santriId      String          @map("santri_id")
+  jenisTagihanId String         @map("jenis_tagihan_id")
+  amount        BigInt
+  status        StatusTagihan   @default(pending)
+  dueDate       DateTime        @map("due_date")
+  description   String?
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  tahunAjaranId String?
+  tahunAjaran   TahunAjaran?     @relation(fields: [tahunAjaranId], references: [id])
+
+  santri        Santri          @relation(fields: [santriId], references: [id])
+  jenisTagihan  JenisTagihan    @relation(fields: [jenisTagihanId], references: [id])
+  transaksi     Transaksi[]
+  notifikasi    Notifikasi[]
+
+  @@map("tagihan")
+}
+
+model Transaksi {
+  id           String          @id @default(uuid())
+  santriId     String          @map("santri_id")
+  tagihanId    String?         @map("tagihan_id") @unique
+  amount       BigInt
+  status       StatusTransaksi @default(pending)
+  paymentDate  DateTime        @map("payment_date")
+  paymentMethod String?
+  note         String?
+  orderId      String         @unique
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+
+  santri       Santri          @relation(fields: [santriId], references: [id], onDelete: Cascade)
+  tagihan      Tagihan?        @relation(fields: [tagihanId], references: [id])
+
+  @@map("transaksi")
+}
+
+model JenisTagihan {
+  id          String    @id @default(uuid())
+  name        String
+  amount      BigInt?
+  description String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  tagihan     Tagihan[]
+
+  @@map("jenis_tagihan")
+}
+
+model Notifikasi {
+  id          String          @id @default(uuid())
+  userId      String          @map("user_id")
+  title       String
+  message     String
+  type        JenisNotifikasi
+  isRead      Boolean         @default(false) @map("is_read")
+  role        Role            @default(santri)
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  tagihanId   String?         @map("tagihan_id")
+  tagihan     Tagihan?        @relation(fields: [tagihanId], references: [id])
+
+  user        User            @relation(fields: [userId], references: [id])
+
+  @@map("notifikasi")
+}
+
+model RiwayatKelas {
+  id           String   @id @default(cuid())
+  santriId     String
+  santri       Santri   @relation(fields: [santriId], references: [id], onDelete: Cascade)
+  kelasLamaId  String
+  kelasLama    Kelas    @relation("KelasLama", fields: [kelasLamaId], references: [id])
+  kelasBaruId  String
+  kelasBaru    Kelas    @relation("KelasBaru", fields: [kelasBaruId], references: [id])
+  tanggal      DateTime @default(now())
+
+  @@index([santriId])
+  @@index([kelasLamaId])
+  @@index([kelasBaruId])
+}
+
+enum Role {
+  admin
+  santri
+}
+
+enum StatusTagihan {
+  pending
+  paid
+  overdue
+}
+
+enum StatusTransaksi {
+  pending
+  approved
+  rejected
+}
+
+enum JenisNotifikasi {
+  // Notifikasi Santri
+  tagihan_baru
+  tagihan_jatuh_tempo
+  pembayaran_diterima
+  pembayaran_ditolak
+  saldo_berkurang
+  saldo_bertambah
+  
+  // Notifikasi Admin
+  pembayaran_baru
+  pembayaran_menunggu
+  pembayaran_ditolak_admin
+  tagihan_jatuh_tempo_admin
+  sistem
+
+  // Tambahan
+  naik_kelas
+}
