@@ -62,6 +62,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -108,7 +109,10 @@ interface Kelas {
 
 const santriFormSchema = z.object({
   name: z.string().min(1, "Nama santri tidak boleh kosong"),
-  santriId: z.string().min(1, "ID Santri tidak boleh kosong"),
+  santriId: z.string()
+    .min(1, "ID Santri tidak boleh kosong")
+    .max(20, "ID Santri maksimal 20 karakter")
+    .regex(/^[A-Za-z0-9\-_]+$/, "ID Santri hanya boleh berisi huruf, angka, tanda hubung, dan underscore"),
   kelasId: z.string().min(1, "Kelas harus dipilih"),
   phone: z.string().optional().transform(val => val === "" ? undefined : val),
   namaBapak: z.string().optional(),
@@ -419,6 +423,7 @@ export default function SantriPage() {
             email: userValues.email,
             password: userValues.password,
             name: values.name,
+            santriId: values.santriId,
             kelasId: values.kelasId,
             phone: values.phone,
             namaBapak: values.namaBapak,
@@ -881,6 +886,9 @@ export default function SantriPage() {
                       <FormControl>
                         <Input placeholder="S001" {...field} />
                       </FormControl>
+                      <FormDescription>
+                        Masukkan ID Santri sesuai format yang diinginkan (contoh: S001, 2024001, dll). ID harus unik dan tidak boleh kosong.
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}

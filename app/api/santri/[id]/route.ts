@@ -7,7 +7,11 @@ import { z } from "zod";
 const santriSchema = z.object({
   userId: z.string().uuid().optional(),
   name: z.string().min(1, "Nama santri tidak boleh kosong").optional(),
-  santriId: z.string().min(1, "ID Santri tidak boleh kosong").optional(),
+  santriId: z.string()
+    .min(1, "ID Santri tidak boleh kosong")
+    .max(20, "ID Santri maksimal 20 karakter")
+    .regex(/^[A-Za-z0-9\-_]+$/, "ID Santri hanya boleh berisi huruf, angka, tanda hubung, dan underscore")
+    .optional(),
   kelasId: z.string().uuid("Pilih kelas yang valid").optional(),
   phone: z.string().optional().transform(val => val === "" ? undefined : val),
   namaBapak: z.string().optional(),

@@ -9,6 +9,10 @@ const registerSchema = z.object({
   password: z.string().min(6, "Password minimal 6 karakter"),
   name: z.string().min(1, "Nama tidak boleh kosong"),
   kelasId: z.string().uuid("Pilih kelas yang valid"),
+  santriId: z.string()
+    .min(1, "ID Santri tidak boleh kosong")
+    .max(20, "ID Santri maksimal 20 karakter")
+    .regex(/^[A-Za-z0-9\-_]+$/, "ID Santri hanya boleh berisi huruf, angka, tanda hubung, dan underscore"),
   phone: z.string().optional().transform(val => val === "" ? undefined : val),
   namaBapak: z.string().optional(),
   namaIbu: z.string().optional(),
@@ -45,24 +49,16 @@ export async function POST(req: Request) {
       );
     }
 
-    // Generate ID Santri otomatis
-    const currentYear = new Date().getFullYear();
-    
-    const lastSantri = await prisma.santri.findFirst({
-      orderBy: { santriId: 'desc' },
-      where: {
-        santriId: {
-          startsWith: `${currentYear}`
-        }
-      }
+    // Cek apakah ID Santri sudah digunakan
+    const existingSantriId = await prisma.santri.findUnique({
+      where: { santriId: validatedData.santriId },
     });
 
-    let newSantriId;
-    if (lastSantri) {
-      const lastNumber = parseInt(lastSantri.santriId.slice(-4));
-      newSantriId = `${currentYear}${String(lastNumber + 1).padStart(4, '0')}`;
-    } else {
-      newSantriId = `${currentYear}0001`;
+    if (existingSantriId) {
+      return NextResponse.json(
+        { message: "ID Santri sudah digunakan" },
+        { status: 400 }
+      );
     }
 
     // Hash password
@@ -80,12 +76,12 @@ export async function POST(req: Request) {
         },
       });
 
-      // Buat santri baru dengan ID otomatis
+      // Buat santri baru dengan ID yang diberikan admin
       const santri = await tx.santri.create({
         data: {
           userId: user.id,
           name: validatedData.name,
-          santriId: newSantriId,
+          santriId: validatedData.santriId,
           kelasId: validatedData.kelasId,
           phone: validatedData.phone,
           namaBapak: validatedData.namaBapak,
@@ -117,6 +113,7 @@ export async function POST(req: Request) {
     const { password, ...userWithoutPassword } = result.user;
 
     return NextResponse.json({
+      success: true,
       message: "Registrasi berhasil",
       data: {
         user: userWithoutPassword,

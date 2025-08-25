@@ -12,7 +12,10 @@ const santriImportSchema = z.object({
   email: z.string().email("Email tidak valid"),
   password: z.string().min(6, "Password minimal 6 karakter"),
   name: z.string().min(1, "Nama tidak boleh kosong"),
-  santriId: z.string().min(1, "ID Santri tidak boleh kosong"),
+  santriId: z.string()
+    .min(1, "ID Santri tidak boleh kosong")
+    .max(20, "ID Santri maksimal 20 karakter")
+    .regex(/^[A-Za-z0-9\-_]+$/, "ID Santri hanya boleh berisi huruf, angka, tanda hubung, dan underscore"),
   kelas: z.string().min(1, "Kelas tidak boleh kosong"),
   tahunAjaran: z.string().min(1, "Tahun ajaran tidak boleh kosong"),
   phone: z.string().optional(),
