@@ -100,10 +100,14 @@ export async function GET(req: Request) {
 
     // Tambahkan field hasTransaction pada setiap tagihan
     const tagihanWithTransaction = tagihan.map((t: any) => {
-      const hasTransaction = t.transaksi?.some((trx: any) => trx.status === "pending" || trx.status === "approved");
+      // hasTransaction hanya true jika ada transaksi yang sudah disetujui
+      const hasTransaction = t.transaksi?.some((trx: any) => trx.status === "approved");
+      // hasPendingTransaction untuk mengecek apakah ada transaksi yang sedang pending
+      const hasPendingTransaction = t.transaksi?.some((trx: any) => trx.status === "pending");
       return {
         ...t,
         hasTransaction,
+        hasPendingTransaction,
       };
     });
 
