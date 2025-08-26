@@ -6,7 +6,7 @@ import { coreApi } from "@/lib/services/midtrans";
 
 export async function GET(
   request: Request,
-  { params }: { params: { tagihanId: string } }
+  { params }: { params: Promise<{ tagihanId: string }> }
 ) {
   try {
     let userId: string | undefined = undefined;
@@ -34,7 +34,7 @@ export async function GET(
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const { tagihanId } = params;
+    const { tagihanId } = await params;
 
     // Validasi UUID
     if (!tagihanId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tagihanId)) {
@@ -44,27 +44,27 @@ export async function GET(
       );
     }
 
-         // Cek tagihan dan verifikasi kepemilikan
-     const tagihan = await prisma.tagihan.findUnique({
-       where: { id: tagihanId },
-       include: {
-         santri: {
-           include: {
-             user: true,
-           },
-         },
-         jenisTagihan: true,
-         transaksi: {
-           where: {
-             paymentMethod: "midtrans"
-           },
-           orderBy: {
-             createdAt: "desc"
-           },
-           take: 1
-         }
-       },
-     });
+    // Cek tagihan dan verifikasi kepemilikan
+    const tagihan = await prisma.tagihan.findUnique({
+      where: { id: tagihanId },
+      include: {
+        santri: {
+          include: {
+            user: true,
+          },
+        },
+        jenisTagihan: true,
+        transaksi: {
+          where: {
+            paymentMethod: "midtrans"
+          },
+          orderBy: {
+            createdAt: "desc"
+          },
+          take: 1
+        }
+      },
+    });
 
     if (!tagihan) {
       return NextResponse.json(
@@ -105,17 +105,17 @@ export async function GET(
       let updatedTagihanStatus = tagihan.status;
 
       if (midtransStatus.transaction_status !== latestTransaksi.status) {
-                 // Update status transaksi
-         if (midtransStatus.transaction_status === "settlement" || midtransStatus.transaction_status === "capture") {
-           updatedStatus = "approved";
-           updatedTagihanStatus = "paid"; // Otomatis disetujui
-         } else if (midtransStatus.transaction_status === "deny" || midtransStatus.transaction_status === "expire" || midtransStatus.transaction_status === "cancel") {
-           updatedStatus = "rejected";
-           updatedTagihanStatus = "pending";
-         } else if (midtransStatus.transaction_status === "pending") {
-           updatedStatus = "pending";
-           updatedTagihanStatus = "pending";
-         }
+        // Update status transaksi
+        if (midtransStatus.transaction_status === "settlement" || midtransStatus.transaction_status === "capture") {
+          updatedStatus = "approved";
+          updatedTagihanStatus = "paid"; // Otomatis disetujui
+        } else if (midtransStatus.transaction_status === "deny" || midtransStatus.transaction_status === "expire" || midtransStatus.transaction_status === "cancel") {
+          updatedStatus = "rejected";
+          updatedTagihanStatus = "pending";
+        } else if (midtransStatus.transaction_status === "pending") {
+          updatedStatus = "pending";
+          updatedTagihanStatus = "pending";
+        }
 
         // Update database jika ada perubahan
         if (updatedStatus !== latestTransaksi.status) {
@@ -193,4 +193,3 @@ export async function GET(
     );
   }
 }
-
