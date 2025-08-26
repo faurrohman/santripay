@@ -41,21 +41,14 @@ export async function POST(request: Request) {
     }
 
     // Update status tagihan & transaksi sesuai status Midtrans
-    let statusTagihan = "pending";
+    let statusTagihan = tagihan.status; // Default: tidak ubah status tagihan
     let statusTransaksi = "pending";
-    
     if (transaction_status === "settlement" || transaction_status === "capture") {
-      // Pembayaran berhasil, status tagihan langsung berubah menjadi "paid" (otomatis)
-      statusTagihan = "paid";
+      statusTagihan = "paid"; // Hanya berubah jadi paid jika pembayaran berhasil
       statusTransaksi = "approved";
     } else if (transaction_status === "deny" || transaction_status === "expire" || transaction_status === "cancel") {
-      // Pembayaran gagal/dibatalkan
-      statusTagihan = "pending";
+      // Status tagihan tidak diubah, tetap seperti sebelumnya (pending/belum dibayar)
       statusTransaksi = "rejected";
-    } else if (transaction_status === "pending") {
-      // Masih dalam proses
-      statusTagihan = "pending";
-      statusTransaksi = "pending";
     }
     console.log("[MIDTRANS_CALLBACK] Akan update status:", { statusTagihan, statusTransaksi });
 
@@ -86,10 +79,13 @@ export async function POST(request: Request) {
           tagihan: { include: { jenisTagihan: true } },
         },
       });
-      await tx.tagihan.update({
-        where: { id: tagihanId },
-        data: { status: statusTagihan as StatusTagihan },
-      });
+      // Update tagihan hanya jika pembayaran berhasil
+      if (statusTagihan !== tagihan.status) {
+        await tx.tagihan.update({
+          where: { id: tagihanId },
+          data: { status: statusTagihan as StatusTagihan },
+        });
+      }
       // Notifikasi otomatis untuk santri
       if (transaksiFull?.santri && transaksiFull.santri.user && transaksiFull.santri.user.id) {
         if (statusTransaksi === "approved") {
