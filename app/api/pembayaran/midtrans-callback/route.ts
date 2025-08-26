@@ -43,12 +43,19 @@ export async function POST(request: Request) {
     // Update status tagihan & transaksi sesuai status Midtrans
     let statusTagihan = "pending";
     let statusTransaksi = "pending";
+    
     if (transaction_status === "settlement" || transaction_status === "capture") {
+      // Pembayaran berhasil, status tagihan langsung berubah menjadi "paid" (otomatis)
       statusTagihan = "paid";
       statusTransaksi = "approved";
     } else if (transaction_status === "deny" || transaction_status === "expire" || transaction_status === "cancel") {
+      // Pembayaran gagal/dibatalkan
       statusTagihan = "pending";
       statusTransaksi = "rejected";
+    } else if (transaction_status === "pending") {
+      // Masih dalam proses
+      statusTagihan = "pending";
+      statusTransaksi = "pending";
     }
     console.log("[MIDTRANS_CALLBACK] Akan update status:", { statusTagihan, statusTransaksi });
 
