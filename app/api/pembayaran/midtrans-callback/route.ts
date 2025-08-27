@@ -24,13 +24,15 @@ export async function POST(request: Request) {
     const { order_id, transaction_status, fraud_status } = body;
     console.log("[MIDTRANS_CALLBACK] order_id:", order_id, "transaction_status:", transaction_status, "fraud_status:", fraud_status);
 
-    // Cari transaksi berdasarkan order_id
+    // Cari transaksi berdasarkan order_id (bisa belum ada jika kita tidak membuatnya saat inisiasi)
     const transaksi = await prisma.transaksi.findFirst({ where: { orderId: order_id } });
-    if (!transaksi) {
-      console.error("[MIDTRANS_CALLBACK] Transaksi tidak ditemukan untuk order_id", order_id);
-      return NextResponse.json({ message: "Transaksi tidak ditemukan" }, { status: 404 });
+    // Ambil tagihanId dari transaksi jika ada, atau dari custom_field1 jika transaksi belum dibuat
+    const tagihanIdFromTrx = transaksi?.tagihanId as string | undefined;
+    const tagihanId = tagihanIdFromTrx || body.custom_field1;
+    if (!tagihanId) {
+      console.error("[MIDTRANS_CALLBACK] tagihanId tidak ditemukan di transaksi maupun custom_field1", { order_id, body });
+      return NextResponse.json({ message: "tagihanId tidak ditemukan" }, { status: 400 });
     }
-    const tagihanId = transaksi.tagihanId as string;
     console.log("[MIDTRANS_CALLBACK] tagihanId dari transaksi:", tagihanId);
 
     // Temukan tagihan terkait
@@ -54,12 +56,27 @@ export async function POST(request: Request) {
 
     // Update transaksi dan tagihan
     await prisma.$transaction(async (tx) => {
-      // Update atau buat transaksi
+      // Cegah pembayaran ganda: jika tagihan sudah paid atau sudah ada transaksi approved, hentikan
+      if (statusTransaksi === "approved") {
+        const approvedExists = await tx.transaksi.findFirst({ where: { tagihanId, status: "approved" } });
+        if (approvedExists || tagihan.status === "paid") {
+          console.warn("[MIDTRANS_CALLBACK] Pembayaran ganda dicegah untuk tagihan", tagihanId);
+          return;
+        }
+      }
+
+      // Update atau buat transaksi berdasarkan tagihanId (unik) untuk mencegah duplikasi
       const transaksiUpsert = await tx.transaksi.upsert({
-        where: { orderId: order_id },
+        where: { tagihanId },
         update: {
           status: statusTransaksi as StatusTransaksi,
           paymentDate: new Date(),
+          tagihanId,
+          santriId: tagihan.santriId,
+          amount: tagihan.amount,
+          paymentMethod: "midtrans",
+          note: `Pembayaran via Midtrans (${transaction_status})`,
+          orderId: order_id,
         },
         create: {
           tagihanId,
@@ -67,6 +84,7 @@ export async function POST(request: Request) {
           amount: tagihan.amount,
           paymentDate: new Date(),
           status: statusTransaksi as StatusTransaksi,
+          paymentMethod: "midtrans",
           note: `Pembayaran via Midtrans (${transaction_status})`,
           orderId: order_id,
         },

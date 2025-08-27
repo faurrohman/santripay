@@ -102,6 +102,9 @@ export async function POST(request: Request) {
         order_id: orderId,
         gross_amount: typeof tagihan.amount === "bigint" ? Number(tagihan.amount) : Number(tagihan.amount),
       },
+      // Simpan tagihanId agar bisa diambil saat callback
+      // Midtrans mendukung custom_field1..3
+      custom_field1: tagihan.id,
       customer_details: {
         first_name: tagihan.santri.name,
         email: tagihan.santri.user.email,
