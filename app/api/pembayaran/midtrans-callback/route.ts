@@ -63,87 +63,89 @@
       }
       console.log("[MIDTRANS_CALLBACK] Akan update status:", { statusTagihan, statusTransaksi });
 
-      // Update transaksi dan tagihan
-      await prisma.$transaction(async (tx) => {
-        // Cegah pembayaran ganda: jika tagihan sudah paid atau sudah ada transaksi approved, hentikan
-        if (statusTransaksi === "approved") {
-          const approvedExists = await tx.transaksi.findFirst({ where: { tagihanId, status: "approved" } });
-          if (approvedExists || tagihan.status === "paid") {
-            console.warn("[MIDTRANS_CALLBACK] Pembayaran ganda dicegah untuk tagihan", tagihanId);
-            return;
-          }
+      // Cegah pembayaran ganda: jika approved dan sudah ada approved sebelumnya atau tagihan sudah paid
+      if (statusTransaksi === "approved") {
+        const approvedExists = await prisma.transaksi.findFirst({ where: { tagihanId, status: "approved" } });
+        if (approvedExists || tagihan.status === "paid") {
+          console.warn("[MIDTRANS_CALLBACK] Pembayaran ganda dicegah untuk tagihan", tagihanId);
+          return NextResponse.json({ message: "Already paid" });
         }
+      }
 
-        // Update atau buat transaksi berdasarkan tagihanId (unik) untuk mencegah duplikasi
-        const transaksiUpsert = await tx.transaksi.upsert({
-          where: { tagihanId },
-          update: {
-            status: statusTransaksi as StatusTransaksi,
-            paymentDate: new Date(),
-            tagihanId,
-            santriId: tagihan.santriId,
-            amount: tagihan.amount,
-            paymentMethod: "midtrans",
-            note: `Pembayaran via Midtrans (${transaction_status})`,
-            orderId: order_id,
-          },
-          create: {
-            tagihanId,
-            santriId: tagihan.santriId,
-            amount: tagihan.amount,
-            paymentDate: new Date(),
-            status: statusTransaksi as StatusTransaksi,
-            paymentMethod: "midtrans",
-            note: `Pembayaran via Midtrans (${transaction_status})`,
-            orderId: order_id,
-          },
+      // Upsert transaksi berdasarkan tagihanId (unik)
+      const transaksiUpsert = await prisma.transaksi.upsert({
+        where: { tagihanId },
+        update: {
+          status: statusTransaksi as StatusTransaksi,
+          paymentDate: new Date(),
+          tagihanId,
+          santriId: tagihan.santriId,
+          amount: tagihan.amount,
+          paymentMethod: "midtrans",
+          note: `Pembayaran via Midtrans (${transaction_status})`,
+          orderId: order_id,
+        },
+        create: {
+          tagihanId,
+          santriId: tagihan.santriId,
+          amount: tagihan.amount,
+          paymentDate: new Date(),
+          status: statusTransaksi as StatusTransaksi,
+          paymentMethod: "midtrans",
+          note: `Pembayaran via Midtrans (${transaction_status})`,
+          orderId: order_id,
+        },
+      });
+
+      // Update status tagihan jika berubah (paid pada settlement/capture accept)
+      if (statusTagihan !== tagihan.status) {
+        await prisma.tagihan.update({
+          where: { id: tagihanId },
+          data: { status: statusTagihan as StatusTagihan },
         });
-        // Ambil ulang transaksi lengkap dengan relasi
-        const transaksiFull = await tx.transaksi.findUnique({
-          where: { id: transaksiUpsert.id },
-          include: {
-            santri: { include: { user: true } },
-            tagihan: { include: { jenisTagihan: true } },
-          },
-        });
-        // Update tagihan hanya jika pembayaran berhasil
-        if (statusTagihan !== tagihan.status) {
-          await tx.tagihan.update({
-            where: { id: tagihanId },
-            data: { status: statusTagihan as StatusTagihan },
-          });
-        }
-        // Notifikasi otomatis untuk santri
-        if (transaksiFull?.santri && transaksiFull.santri.user && transaksiFull.santri.user.id) {
-          if (statusTransaksi === "approved") {
-            await tx.notifikasi.create({
-              data: {
-                userId: transaksiFull.santri.user.id,
-                title: "Pembayaran Berhasil",
-                message: `Pembayaran Anda untuk ${transaksiFull.tagihan?.jenisTagihan?.name ?? "-"} sebesar Rp ${Number(transaksiFull.amount).toLocaleString('id-ID')} telah berhasil diproses melalui Midtrans.`,
-                type: "pembayaran_diterima"
-              },
-            });
-          } else if (statusTransaksi === "rejected") {
-            await tx.notifikasi.create({
-              data: {
-                userId: transaksiFull.santri.user.id,
-                title: "Pembayaran Gagal",
-                message: `Pembayaran Anda untuk ${transaksiFull.tagihan?.jenisTagihan?.name ?? "-"} sebesar Rp ${Number(transaksiFull.amount).toLocaleString('id-ID')} gagal diproses oleh Midtrans. Silakan coba lagi atau hubungi admin.`,
-                type: "pembayaran_ditolak"
-              },
-            });
-          }
-        }
-        // Notifikasi otomatis untuk admin jika pembayaran berhasil
+      }
+
+      // Ambil ulang transaksi lengkap
+      const transaksiFull = await prisma.transaksi.findUnique({
+        where: { id: transaksiUpsert.id },
+        include: {
+          santri: { include: { user: true } },
+          tagihan: { include: { jenisTagihan: true } },
+        },
+      });
+
+      // Notifikasi santri
+      if (transaksiFull?.santri && transaksiFull.santri.user && transaksiFull.santri.user.id) {
         if (statusTransaksi === "approved") {
-          const adminUsers = await tx.user.findMany({
-            where: { role: "admin", receiveAppNotifications: true },
-            select: { id: true },
+          await prisma.notifikasi.create({
+            data: {
+              userId: transaksiFull.santri.user.id,
+              title: "Pembayaran Berhasil",
+              message: `Pembayaran Anda untuk ${transaksiFull.tagihan?.jenisTagihan?.name ?? "-"} sebesar Rp ${Number(transaksiFull.amount).toLocaleString('id-ID')} telah berhasil diproses melalui Midtrans.`,
+              type: "pembayaran_diterima"
+            },
           });
-          if (!transaksiFull) return;
+        } else if (statusTransaksi === "rejected") {
+          await prisma.notifikasi.create({
+            data: {
+              userId: transaksiFull.santri.user.id,
+              title: "Pembayaran Gagal",
+              message: `Pembayaran Anda untuk ${transaksiFull.tagihan?.jenisTagihan?.name ?? "-"} sebesar Rp ${Number(transaksiFull.amount).toLocaleString('id-ID')} gagal diproses oleh Midtrans. Silakan coba lagi atau hubungi admin.`,
+              type: "pembayaran_ditolak"
+            },
+          });
+        }
+      }
+
+      // Notifikasi admin jika approved
+      if (statusTransaksi === "approved") {
+        const adminUsers = await prisma.user.findMany({
+          where: { role: "admin", receiveAppNotifications: true },
+          select: { id: true },
+        });
+        if (transaksiFull) {
           await Promise.all(adminUsers.map(async (adminUser: { id: string }) => {
-            await tx.notifikasi.create({
+            await prisma.notifikasi.create({
               data: {
                 userId: adminUser.id,
                 title: "Pembayaran Midtrans Berhasil",
@@ -153,7 +155,7 @@
             });
           }));
         }
-      });
+      }
 
       console.log("[MIDTRANS_CALLBACK] Callback processed sukses untuk tagihanId:", tagihanId);
       return NextResponse.json({ message: "Callback processed" });
