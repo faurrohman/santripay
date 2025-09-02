@@ -47,7 +47,23 @@ interface Santri {
     id: string;
     name: string;
     level?: string;
+    tahunAjaran?: {
+      id: string;
+      name: string;
+      aktif?: boolean;
+    };
   };
+  riwayatKelas: {
+    kelasBaruId: string;
+    kelasBaru: {
+      id: string;
+      name: string;
+      level?: string;
+      tahunAjaran: {
+        name: string;
+      };
+    };
+  }[];
 }
 
 interface Kelas {
@@ -101,8 +117,8 @@ export default function NaikKelasPage() {
           throw new Error('Tidak ada tahun ajaran aktif');
         }
 
-        // Fetch daftar kelas dengan filter tahun ajaran aktif
-        const kelasResponse = await fetch(`/api/kelas?tahunAjaranId=${tahunAjaranAktif.id}`);
+        // Fetch semua kelas untuk dropdown Kelas Baru
+        const kelasResponse = await fetch('/api/kelas');
         const kelasData = await kelasResponse.json();
         
         if (!kelasResponse.ok) {
@@ -148,20 +164,37 @@ export default function NaikKelasPage() {
     );
   };
 
-  // Fungsi untuk memfilter kelas berdasarkan kelas lama
-  const filterKelasBaru = (kelasLamaId?: string | null): Kelas[] => {
-    if (!kelasLamaId) return kelasList;
+  // Fungsi untuk memfilter kelas berdasarkan kelas lama dan riwayat santri
+  const filterKelasBaru = (kelasLamaId?: string | null, selectedSantriIds?: string[]): Kelas[] => {
+    if (!kelasLamaId || !selectedSantriIds || selectedSantriIds.length === 0) return kelasList;
     
     // Ambil level kelas lama
     const kelasLama = kelasList.find(k => k.id === kelasLamaId);
     
     if (!kelasLama) return kelasList;
 
-    // Filter kelas baru yang memiliki level lebih tinggi
+    // Dapatkan semua kelas yang sudah pernah dijalani oleh santri yang dipilih
+    const kelasYangSudahDijalani = new Set<string>();
+    selectedSantriIds.forEach(santriId => {
+      const santri = santriList.find(s => s.id === santriId);
+      if (santri) {
+        // Tambahkan kelas saat ini
+        kelasYangSudahDijalani.add(santri.kelas.id);
+        // Tambahkan semua kelas dari riwayat
+        santri.riwayatKelas.forEach(riwayat => {
+          kelasYangSudahDijalani.add(riwayat.kelasBaruId);
+        });
+      }
+    });
+
+    // Filter kelas baru yang:
+    // 1. Bukan kelas lama
+    // 2. Belum pernah dijalani oleh santri yang dipilih
+    // 3. Memiliki level yang sesuai (bisa naik atau sama)
     return kelasList.filter(k => 
       k.id !== kelasLamaId && 
-      (!kelasLama.level || !k.level || k.level > kelasLama.level) &&
-      k.tahunAjaran?.aktif
+      !kelasYangSudahDijalani.has(k.id) &&
+      (!kelasLama.level || !k.level || k.level >= kelasLama.level)
     );
   };
 
@@ -184,6 +217,28 @@ export default function NaikKelasPage() {
 
     if (selectedSantri.length === 0) {
       toast.error("Pilih minimal satu santri");
+      return false;
+    }
+
+    // Validasi: pastikan tidak ada santri yang mundur ke kelas yang sudah pernah dijalani
+    const santriYangMundur = selectedSantri.filter(santriId => {
+      const santri = santriList.find(s => s.id === santriId);
+      if (!santri) return false;
+      
+      // Cek apakah kelas baru sudah pernah dijalani
+      const sudahPernahDiKelasBaru = santri.riwayatKelas.some(riwayat => 
+        riwayat.kelasBaruId === kelasBaru
+      );
+      
+      return sudahPernahDiKelasBaru;
+    });
+
+    if (santriYangMundur.length > 0) {
+      const namaSantri = santriYangMundur.map(id => 
+        santriList.find(s => s.id === id)?.name
+      ).filter(Boolean).join(', ');
+      
+      toast.error(`Santri berikut tidak bisa mundur ke kelas yang sudah pernah dijalani: ${namaSantri}`);
       return false;
     }
 
@@ -275,7 +330,7 @@ export default function NaikKelasPage() {
     if (!kelasLama) {
       return (
         <TableRow>
-          <TableCell colSpan={6} className="text-center">
+          <TableCell colSpan={8} className="text-center">
             Pilih Kelas Lama untuk Melihat Daftar Santri
           </TableCell>
         </TableRow>
@@ -285,7 +340,7 @@ export default function NaikKelasPage() {
     if (santriList.length === 0) {
       return (
         <TableRow>
-          <TableCell colSpan={6} className="text-center">
+          <TableCell colSpan={8} className="text-center">
             Tidak ada santri di kelas ini
           </TableCell>
         </TableRow>
@@ -302,6 +357,32 @@ export default function NaikKelasPage() {
         </TableCell>
         <TableCell>{santri.name}</TableCell>
         <TableCell>{santri.kelas.name}</TableCell>
+        <TableCell>
+          {santri.kelas.tahunAjaran?.name || '-'}
+          {santri.kelas.tahunAjaran?.aktif && (
+            <span className="ml-1 text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">Aktif</span>
+          )}
+        </TableCell>
+        <TableCell>
+          <div className="text-sm">
+            {santri.riwayatKelas.length > 0 ? (
+              <div className="space-y-1">
+                {santri.riwayatKelas.slice(0, 2).map((riwayat, idx) => (
+                  <div key={idx} className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded">
+                    {riwayat.kelasBaru.name} ({riwayat.kelasBaru.tahunAjaran.name})
+                  </div>
+                ))}
+                {santri.riwayatKelas.length > 2 && (
+                  <div className="text-xs text-muted-foreground">
+                    +{santri.riwayatKelas.length - 2} kelas lainnya
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span className="text-muted-foreground">Belum ada riwayat</span>
+            )}
+          </div>
+        </TableCell>
         <TableCell>
           {new Intl.NumberFormat('id-ID', { 
             style: 'currency', 
@@ -337,6 +418,8 @@ export default function NaikKelasPage() {
         </TableHead>
         <TableHead>Nama Santri</TableHead>
         <TableHead>Kelas</TableHead>
+        <TableHead>Tahun Ajaran</TableHead>
+        <TableHead>Riwayat Kelas</TableHead>
         <TableHead>Total Tagihan</TableHead>
         <TableHead>Tagihan Belum Lunas</TableHead>
         <TableHead>Status</TableHead>
@@ -351,14 +434,27 @@ export default function NaikKelasPage() {
       santri => santri.tagihanBelumLunas && santri.tagihanBelumLunas > 0
     );
 
+    // Hitung kelas yang tersedia untuk dipilih
+    const kelasTersedia = filterKelasBaru(kelasLama, selectedSantri);
+    const totalKelas = kelasList.length;
+    const kelasTidakTersedia = totalKelas - kelasTersedia.length - 1; // -1 untuk kelas lama
+
     return (
       <div className="flex justify-between items-center mt-4">
-        <div>
+        <div className="space-y-2">
           {santriBelumsLunas.length > 0 && (
             <p className="text-red-600 font-semibold">
-              Peringatan: {santriBelumsLunas.length} santri memiliki tagihan belum lunas
+              ⚠️ Peringatan: {santriBelumsLunas.length} santri memiliki tagihan belum lunas
             </p>
           )}
+          {kelasTidakTersedia > 0 && (
+            <p className="text-blue-600 text-sm">
+              ℹ️ {kelasTidakTersedia} kelas tidak tersedia (sudah pernah dijalani atau level tidak sesuai)
+            </p>
+          )}
+          <p className="text-gray-600 text-sm">
+            💡 Kelas Baru akan difilter otomatis berdasarkan riwayat kelas santri yang dipilih
+          </p>
         </div>
         <div className="flex space-x-2">
           <Button 
@@ -429,6 +525,8 @@ export default function NaikKelasPage() {
                 <TableHead><Skeleton className="h-4 w-32" /></TableHead>
                 <TableHead><Skeleton className="h-4 w-24" /></TableHead>
                 <TableHead><Skeleton className="h-4 w-24" /></TableHead>
+                <TableHead><Skeleton className="h-4 w-32" /></TableHead>
+                <TableHead><Skeleton className="h-4 w-24" /></TableHead>
                 <TableHead><Skeleton className="h-4 w-24" /></TableHead>
                 <TableHead><Skeleton className="h-4 w-20" /></TableHead>
               </TableRow>
@@ -439,6 +537,8 @@ export default function NaikKelasPage() {
                   <TableCell><Skeleton className="h-4 w-4" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-20" /></TableCell>
@@ -533,7 +633,7 @@ export default function NaikKelasPage() {
                   <SelectValue placeholder={!kelasLama ? "Pilih Kelas Lama Dulu" : "Pilih Kelas Baru"} />
                 </SelectTrigger>
                 <SelectContent>
-                  {filterKelasBaru(kelasLama).map(kelas => (
+                  {filterKelasBaru(kelasLama, selectedSantri).map(kelas => (
                     <SelectItem key={kelas.id} value={kelas.id}>
                       {kelas.name} {kelas.level ? `(${kelas.level})` : ''} {kelas.tahunAjaran ? `- ${kelas.tahunAjaran.name}` : ''}
                     </SelectItem>

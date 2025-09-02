@@ -25,23 +25,8 @@ export async function GET(req: Request) {
     const kelasId = searchParams.get('kelasId');
     const withTagihan = searchParams.get('withTagihan') === 'true';
 
-    // Ambil tahun ajaran aktif
-    const tahunAjaranAktif = await prisma.tahunAjaran.findFirst({
-      where: { aktif: true }
-    });
-
-    if (!tahunAjaranAktif) {
-      return NextResponse.json({ 
-        message: "Tidak ada tahun ajaran aktif" 
-      }, { status: 400 });
-    }
-
     // Siapkan kondisi where
-    const whereCondition: any = {
-      kelas: {
-        tahunAjaranId: tahunAjaranAktif.id
-      }
-    };
+    const whereCondition: any = {};
 
     // Tambahkan filter kelas jika ada
     if (kelasId) {
@@ -59,7 +44,34 @@ export async function GET(req: Request) {
           select: {
             id: true,
             name: true,
-            level: true
+            level: true,
+            tahunAjaran: {
+              select: {
+                id: true,
+                name: true,
+                aktif: true
+              }
+            }
+          }
+        },
+        riwayatKelas: {
+          select: {
+            kelasBaruId: true,
+            kelasBaru: {
+              select: {
+                id: true,
+                name: true,
+                level: true,
+                tahunAjaran: {
+                  select: {
+                    name: true
+                  }
+                }
+              }
+            }
+          },
+          orderBy: {
+            tanggal: 'desc'
           }
         }
       },
