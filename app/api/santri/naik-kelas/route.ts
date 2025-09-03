@@ -164,49 +164,73 @@ export async function POST(req: Request) {
 
     // Mulai transaksi untuk memastikan konsistensi data
     const result = await prisma.$transaction(async (tx) => {
-      // Simpan riwayat kenaikan kelas
-      const naikKelasRecords = await Promise.all(
-        santriIds.map(async (santriId) => {
-          // Ambil informasi santri
-          const santri = await tx.santri.findUnique({
-            where: { id: santriId },
-            include: { user: true }
-          });
+      // Buat array untuk batch operations
+      const updateOperations = [];
+      const riwayatOperations = [];
+      const notifikasiOperations = [];
 
-          // Update kelas santri
-          await tx.santri.update({
+      // Siapkan semua operasi terlebih dahulu
+      for (const santriId of santriIds) {
+        // Update kelas santri
+        updateOperations.push(
+          tx.santri.update({
             where: { id: santriId },
-            data: { 
-              kelasId: kelasBaru,
-              riwayatKelas: {
-                create: {
-                  kelasLamaId,
-                  kelasBaruId: kelasBaru,
-                  tanggal: new Date()
-                }
-              }
+            data: { kelasId: kelasBaru }
+          })
+        );
+
+        // Buat riwayat kenaikan kelas
+        riwayatOperations.push(
+          tx.riwayatKelas.create({
+            data: {
+              santriId,
+              kelasLamaId,
+              kelasBaruId: kelasBaru,
+              tanggal: new Date()
             }
-          });
+          })
+        );
+      }
 
-          // Buat notifikasi untuk setiap santri
-          if (santri?.user) {
-            await tx.notifikasi.create({
+      // Eksekusi batch update santri
+      await Promise.all(updateOperations);
+      
+      // Eksekusi batch create riwayat
+      await Promise.all(riwayatOperations);
+
+      // Ambil semua santri yang sudah diupdate untuk membuat notifikasi
+      const updatedSantri = await tx.santri.findMany({
+        where: { id: { in: santriIds } },
+        include: { user: true }
+      });
+
+      // Buat notifikasi untuk setiap santri
+      for (const santri of updatedSantri) {
+        if (santri?.user) {
+          notifikasiOperations.push(
+            tx.notifikasi.create({
               data: {
                 userId: santri.user.id,
                 title: "Kenaikan Kelas",
                 message: `Selamat! Anda telah naik kelas dari ${kelasLamaInfo?.name || 'Kelas Lama'} ke ${kelasBaruInfo?.name || 'Kelas Baru'}. ${kelasLamaInfo?.level && kelasBaruInfo?.level ? `(Level: ${kelasLamaInfo.level} → ${kelasBaruInfo.level})` : ''}`,
-                type: 'naik_kelas', // Gunakan tipe spesifik untuk kenaikan kelas
+                type: 'naik_kelas',
                 role: 'santri',
                 isRead: false
               }
-            });
-          }
+            })
+          );
+        }
+      }
 
-          return santriId;
-        })
-      );
+      // Eksekusi batch create notifikasi
+      if (notifikasiOperations.length > 0) {
+        await Promise.all(notifikasiOperations);
+      }
 
-      return naikKelasRecords;
+      return santriIds;
+    }, {
+      timeout: 10000, // Increase timeout to 10 seconds
+      maxWait: 15000  // Maximum wait time for transaction to start
     });
 
     return NextResponse.json({ 
@@ -219,6 +243,22 @@ export async function POST(req: Request) {
   } catch (error) {
     console.error("[NAIK_KELAS_ERROR]", error);
 
+    // Handle Prisma transaction errors specifically
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2028') {
+        return NextResponse.json({ 
+          message: "Transaksi database timeout. Silakan coba lagi atau hubungi administrator jika masalah berlanjut.",
+          errorCode: error.code,
+          suggestion: "Coba kurangi jumlah santri yang dipilih atau coba lagi dalam beberapa saat."
+        }, { status: 408 }); // Request Timeout
+      }
+      
+      return NextResponse.json({ 
+        message: "Error database: " + error.message,
+        errorCode: error.code
+      }, { status: 400 });
+    }
+
     // Handle validation errors
     if (error instanceof z.ZodError) {
       return NextResponse.json({ 
@@ -229,7 +269,8 @@ export async function POST(req: Request) {
 
     // Handle other errors
     return NextResponse.json({ 
-      message: "Terjadi kesalahan saat proses kenaikan kelas" 
+      message: "Terjadi kesalahan saat proses kenaikan kelas",
+      errorDetails: error instanceof Error ? error.message : "Unknown error"
     }, { status: 500 });
   }
 }
