@@ -162,65 +162,134 @@ export async function POST(req: Request) {
       })
     ]);
 
-    // Gunakan pendekatan individual operations untuk menghindari timeout
-    // Meskipun tidak atomic, lebih reliable untuk operasi besar
+    // Gunakan pendekatan batch dengan delay untuk menghindari connection pool exhaustion
+    // Operasi dibagi menjadi batch kecil dengan delay antar batch
     
     try {
-      // 1. Update semua santri secara parallel
-      console.log(`[NAIK_KELAS] Memulai update ${santriIds.length} santri...`);
-      const updatePromises = santriIds.map(santriId =>
-        prisma.santri.update({
-          where: { id: santriId },
-          data: { kelasId: kelasBaru }
-        })
-      );
+      const BATCH_SIZE = 5; // Proses 5 santri per batch
+      const DELAY_MS = 100; // Delay 100ms antar batch
       
-      await Promise.all(updatePromises);
-      console.log(`[NAIK_KELAS] ✅ Berhasil update ${santriIds.length} santri`);
-
-      // 2. Buat semua riwayat kelas secara parallel
-      console.log(`[NAIK_KELAS] Memulai create riwayat kelas...`);
-      const riwayatPromises = santriIds.map(santriId =>
-        prisma.riwayatKelas.create({
-          data: {
-            santriId,
-            kelasLamaId,
-            kelasBaruId: kelasBaru,
-            tanggal: new Date()
-          }
-        })
-      );
+      // Helper function untuk delay
+      const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
       
-      await Promise.all(riwayatPromises);
-      console.log(`[NAIK_KELAS] ✅ Berhasil create ${santriIds.length} riwayat kelas`);
-
-      // 3. Buat notifikasi untuk semua santri secara parallel
-      console.log(`[NAIK_KELAS] Memulai create notifikasi...`);
-      const notifikasiPromises = santriIds.map(async (santriId) => {
-        const santri = await prisma.santri.findUnique({
-          where: { id: santriId },
-          include: { user: true }
-        });
+      // 1. Update santri dalam batch kecil
+      console.log(`[NAIK_KELAS] Memulai update ${santriIds.length} santri dari kelas ${kelasLamaId} ke kelas ${kelasBaru}...`);
+      
+      for (let i = 0; i < santriIds.length; i += BATCH_SIZE) {
+        const batch = santriIds.slice(i, i + BATCH_SIZE);
+        console.log(`[NAIK_KELAS] Processing batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(santriIds.length/BATCH_SIZE)} (${batch.length} santri)`);
         
-        if (santri?.user) {
-          return prisma.notifikasi.create({
-            data: {
-              userId: santri.user.id,
-              title: "Kenaikan Kelas",
-              message: `Selamat! Anda telah naik kelas dari ${kelasLamaInfo?.name || 'Kelas Lama'} ke ${kelasBaruInfo?.name || 'Kelas Baru'}. ${kelasLamaInfo?.level && kelasBaruInfo?.level ? `(Level: ${kelasLamaInfo.level} → ${kelasBaruInfo.level})` : ''}`,
-              type: 'naik_kelas',
-              role: 'santri',
-              isRead: false
-            }
-          });
+        const updatePromises = batch.map(santriId =>
+          prisma.santri.update({
+            where: { id: santriId },
+            data: { kelasId: kelasBaru }
+          })
+        );
+        
+        const updateResults = await Promise.all(updatePromises);
+        console.log(`[NAIK_KELAS] ✅ Batch ${Math.floor(i/BATCH_SIZE) + 1} berhasil - ${updateResults.length} santri diupdate`);
+        
+        // Verifikasi update berhasil
+        for (const result of updateResults) {
+          console.log(`[NAIK_KELAS] ✅ Santri ${result.name} (ID: ${result.id}) berhasil dipindah ke kelas ${result.kelasId}`);
         }
-        return null;
+        
+        // Delay antar batch untuk menghindari connection pool exhaustion
+        if (i + BATCH_SIZE < santriIds.length) {
+          await delay(DELAY_MS);
+        }
+      }
+      
+      console.log(`[NAIK_KELAS] ✅ Semua ${santriIds.length} santri berhasil diupdate ke kelas ${kelasBaru}`);
+
+      // Verifikasi final: cek apakah semua santri sudah pindah kelas
+      console.log(`[NAIK_KELAS] 🔍 Verifikasi final: memeriksa apakah semua santri sudah pindah kelas...`);
+      const verificationResults = await prisma.santri.findMany({
+        where: { id: { in: santriIds } },
+        select: { id: true, name: true, kelasId: true }
       });
       
-      const notifikasiResults = await Promise.all(notifikasiPromises);
-      const notifikasiBerhasil = notifikasiResults.filter(Boolean).length;
-      console.log(`[NAIK_KELAS] ✅ Berhasil create ${notifikasiBerhasil} notifikasi`);
+      const santriYangSudahPindah = verificationResults.filter(s => s.kelasId === kelasBaru).length;
+      const santriYangBelumPindah = verificationResults.filter(s => s.kelasId !== kelasBaru);
+      
+      console.log(`[NAIK_KELAS] 📊 Hasil verifikasi: ${santriYangSudahPindah}/${santriIds.length} santri berhasil pindah ke kelas ${kelasBaru}`);
+      
+      if (santriYangBelumPindah.length > 0) {
+        console.log(`[NAIK_KELAS] ⚠️ Peringatan: ${santriYangBelumPindah.length} santri belum pindah kelas:`);
+        santriYangBelumPindah.forEach(s => {
+          console.log(`[NAIK_KELAS] ⚠️ - ${s.name} (ID: ${s.id}) masih di kelas ${s.kelasId}`);
+        });
+      }
 
+      // 2. Buat riwayat kelas dalam batch kecil
+      console.log(`[NAIK_KELAS] Memulai create riwayat kelas dalam batch ${BATCH_SIZE}...`);
+      
+      for (let i = 0; i < santriIds.length; i += BATCH_SIZE) {
+        const batch = santriIds.slice(i, i + BATCH_SIZE);
+        console.log(`[NAIK_KELAS] Processing riwayat batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(santriIds.length/BATCH_SIZE)} (${batch.length} santri)`);
+        
+        const riwayatPromises = batch.map(santriId =>
+          prisma.riwayatKelas.create({
+            data: {
+              santriId,
+              kelasLamaId,
+              kelasBaruId: kelasBaru,
+              tanggal: new Date()
+            }
+          })
+        );
+        
+        await Promise.all(riwayatPromises);
+        console.log(`[NAIK_KELAS] ✅ Riwayat batch ${Math.floor(i/BATCH_SIZE) + 1} berhasil`);
+        
+        if (i + BATCH_SIZE < santriIds.length) {
+          await delay(DELAY_MS);
+        }
+      }
+      
+      console.log(`[NAIK_KELAS] ✅ Semua ${santriIds.length} riwayat kelas berhasil dibuat`);
+
+      // 3. Buat notifikasi dalam batch kecil
+      console.log(`[NAIK_KELAS] Memulai create notifikasi dalam batch ${BATCH_SIZE}...`);
+      let totalNotifikasi = 0;
+      
+      for (let i = 0; i < santriIds.length; i += BATCH_SIZE) {
+        const batch = santriIds.slice(i, i + BATCH_SIZE);
+        console.log(`[NAIK_KELAS] Processing notifikasi batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(santriIds.length/BATCH_SIZE)} (${batch.length} santri)`);
+        
+        const notifikasiPromises = batch.map(async (santriId) => {
+          const santri = await prisma.santri.findUnique({
+            where: { id: santriId },
+            include: { user: true }
+          });
+          
+          if (santri?.user) {
+            return prisma.notifikasi.create({
+              data: {
+                userId: santri.user.id,
+                title: "Kenaikan Kelas",
+                message: `Selamat! Anda telah naik kelas dari ${kelasLamaInfo?.name || 'Kelas Lama'} ke ${kelasBaruInfo?.name || 'Kelas Baru'}. ${kelasLamaInfo?.level && kelasBaruInfo?.level ? `(Level: ${kelasLamaInfo.level} → ${kelasBaruInfo.level})` : ''}`,
+                type: 'naik_kelas',
+                role: 'santri',
+                isRead: false
+              }
+            });
+          }
+          return null;
+        });
+        
+        const notifikasiResults = await Promise.all(notifikasiPromises);
+        const batchNotifikasi = notifikasiResults.filter(Boolean).length;
+        totalNotifikasi += batchNotifikasi;
+        
+        console.log(`[NAIK_KELAS] ✅ Notifikasi batch ${Math.floor(i/BATCH_SIZE) + 1} berhasil (${batchNotifikasi} notifikasi)`);
+        
+        if (i + BATCH_SIZE < santriIds.length) {
+          await delay(DELAY_MS);
+        }
+      }
+      
+      console.log(`[NAIK_KELAS] ✅ Total ${totalNotifikasi} notifikasi berhasil dibuat`);
       console.log(`[NAIK_KELAS] 🎉 Semua operasi berhasil!`);
       
       return NextResponse.json({ 
@@ -233,17 +302,34 @@ export async function POST(req: Request) {
     } catch (error) {
       console.error("[NAIK_KELAS_OPERATION_ERROR]", error);
       
-      // Jika ada error, coba rollback update santri
+      // Jika ada error, coba rollback update santri dalam batch kecil
       try {
-        console.log("[NAIK_KELAS] ⚠️ Mencoba rollback update santri...");
-        const rollbackPromises = santriIds.map(santriId =>
-          prisma.santri.update({
-            where: { id: santriId },
-            data: { kelasId: kelasLamaId }
-          })
-        );
-        await Promise.all(rollbackPromises);
-        console.log("[NAIK_KELAS] ✅ Rollback berhasil");
+        console.log("[NAIK_KELAS] ⚠️ Mencoba rollback update santri dalam batch kecil...");
+        
+        const BATCH_SIZE = 5;
+        const DELAY_MS = 100;
+        const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+        
+        for (let i = 0; i < santriIds.length; i += BATCH_SIZE) {
+          const batch = santriIds.slice(i, i + BATCH_SIZE);
+          console.log(`[NAIK_KELAS] Rollback batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(santriIds.length/BATCH_SIZE)} (${batch.length} santri)`);
+          
+          const rollbackPromises = batch.map(santriId =>
+            prisma.santri.update({
+              where: { id: santriId },
+              data: { kelasId: kelasLamaId }
+            })
+          );
+          
+          await Promise.all(rollbackPromises);
+          console.log(`[NAIK_KELAS] ✅ Rollback batch ${Math.floor(i/BATCH_SIZE) + 1} berhasil`);
+          
+          if (i + BATCH_SIZE < santriIds.length) {
+            await delay(DELAY_MS);
+          }
+        }
+        
+        console.log("[NAIK_KELAS] ✅ Rollback semua santri berhasil");
       } catch (rollbackError) {
         console.error("[NAIK_KELAS_ROLLBACK_ERROR]", rollbackError);
         console.log("[NAIK_KELAS] ❌ Rollback gagal - data mungkin tidak konsisten");
