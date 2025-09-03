@@ -162,83 +162,95 @@ export async function POST(req: Request) {
       })
     ]);
 
-    // Mulai transaksi untuk memastikan konsistensi data
-    const result = await prisma.$transaction(async (tx) => {
-      // Buat array untuk batch operations
-      const updateOperations = [];
-      const riwayatOperations = [];
-      const notifikasiOperations = [];
-
-      // Siapkan semua operasi terlebih dahulu
-      for (const santriId of santriIds) {
-        // Update kelas santri
-        updateOperations.push(
-          tx.santri.update({
-            where: { id: santriId },
-            data: { kelasId: kelasBaru }
-          })
-        );
-
-        // Buat riwayat kenaikan kelas
-        riwayatOperations.push(
-          tx.riwayatKelas.create({
-            data: {
-              santriId,
-              kelasLamaId,
-              kelasBaruId: kelasBaru,
-              tanggal: new Date()
-            }
-          })
-        );
-      }
-
-      // Eksekusi batch update santri
-      await Promise.all(updateOperations);
+    // Gunakan pendekatan individual operations untuk menghindari timeout
+    // Meskipun tidak atomic, lebih reliable untuk operasi besar
+    
+    try {
+      // 1. Update semua santri secara parallel
+      console.log(`[NAIK_KELAS] Memulai update ${santriIds.length} santri...`);
+      const updatePromises = santriIds.map(santriId =>
+        prisma.santri.update({
+          where: { id: santriId },
+          data: { kelasId: kelasBaru }
+        })
+      );
       
-      // Eksekusi batch create riwayat
-      await Promise.all(riwayatOperations);
+      await Promise.all(updatePromises);
+      console.log(`[NAIK_KELAS] ✅ Berhasil update ${santriIds.length} santri`);
 
-      // Ambil semua santri yang sudah diupdate untuk membuat notifikasi
-      const updatedSantri = await tx.santri.findMany({
-        where: { id: { in: santriIds } },
-        include: { user: true }
-      });
+      // 2. Buat semua riwayat kelas secara parallel
+      console.log(`[NAIK_KELAS] Memulai create riwayat kelas...`);
+      const riwayatPromises = santriIds.map(santriId =>
+        prisma.riwayatKelas.create({
+          data: {
+            santriId,
+            kelasLamaId,
+            kelasBaruId: kelasBaru,
+            tanggal: new Date()
+          }
+        })
+      );
+      
+      await Promise.all(riwayatPromises);
+      console.log(`[NAIK_KELAS] ✅ Berhasil create ${santriIds.length} riwayat kelas`);
 
-      // Buat notifikasi untuk setiap santri
-      for (const santri of updatedSantri) {
+      // 3. Buat notifikasi untuk semua santri secara parallel
+      console.log(`[NAIK_KELAS] Memulai create notifikasi...`);
+      const notifikasiPromises = santriIds.map(async (santriId) => {
+        const santri = await prisma.santri.findUnique({
+          where: { id: santriId },
+          include: { user: true }
+        });
+        
         if (santri?.user) {
-          notifikasiOperations.push(
-            tx.notifikasi.create({
-              data: {
-                userId: santri.user.id,
-                title: "Kenaikan Kelas",
-                message: `Selamat! Anda telah naik kelas dari ${kelasLamaInfo?.name || 'Kelas Lama'} ke ${kelasBaruInfo?.name || 'Kelas Baru'}. ${kelasLamaInfo?.level && kelasBaruInfo?.level ? `(Level: ${kelasLamaInfo.level} → ${kelasBaruInfo.level})` : ''}`,
-                type: 'naik_kelas',
-                role: 'santri',
-                isRead: false
-              }
-            })
-          );
+          return prisma.notifikasi.create({
+            data: {
+              userId: santri.user.id,
+              title: "Kenaikan Kelas",
+              message: `Selamat! Anda telah naik kelas dari ${kelasLamaInfo?.name || 'Kelas Lama'} ke ${kelasBaruInfo?.name || 'Kelas Baru'}. ${kelasLamaInfo?.level && kelasBaruInfo?.level ? `(Level: ${kelasLamaInfo.level} → ${kelasBaruInfo.level})` : ''}`,
+              type: 'naik_kelas',
+              role: 'santri',
+              isRead: false
+            }
+          });
         }
+        return null;
+      });
+      
+      const notifikasiResults = await Promise.all(notifikasiPromises);
+      const notifikasiBerhasil = notifikasiResults.filter(Boolean).length;
+      console.log(`[NAIK_KELAS] ✅ Berhasil create ${notifikasiBerhasil} notifikasi`);
+
+      console.log(`[NAIK_KELAS] 🎉 Semua operasi berhasil!`);
+      
+      return NextResponse.json({ 
+        message: "Proses kenaikan kelas berhasil", 
+        santriDinaikan: santriIds.length,
+        kelasLama: kelasLamaInfo?.name,
+        kelasBaru: kelasBaruInfo?.name
+      }, { status: 200 });
+
+    } catch (error) {
+      console.error("[NAIK_KELAS_OPERATION_ERROR]", error);
+      
+      // Jika ada error, coba rollback update santri
+      try {
+        console.log("[NAIK_KELAS] ⚠️ Mencoba rollback update santri...");
+        const rollbackPromises = santriIds.map(santriId =>
+          prisma.santri.update({
+            where: { id: santriId },
+            data: { kelasId: kelasLamaId }
+          })
+        );
+        await Promise.all(rollbackPromises);
+        console.log("[NAIK_KELAS] ✅ Rollback berhasil");
+      } catch (rollbackError) {
+        console.error("[NAIK_KELAS_ROLLBACK_ERROR]", rollbackError);
+        console.log("[NAIK_KELAS] ❌ Rollback gagal - data mungkin tidak konsisten");
       }
-
-      // Eksekusi batch create notifikasi
-      if (notifikasiOperations.length > 0) {
-        await Promise.all(notifikasiOperations);
-      }
-
-      return santriIds;
-    }, {
-      timeout: 10000, // Increase timeout to 10 seconds
-      maxWait: 15000  // Maximum wait time for transaction to start
-    });
-
-    return NextResponse.json({ 
-      message: "Proses kenaikan kelas berhasil", 
-      santriDinaikan: result.length,
-      kelasLama: kelasLamaInfo?.name,
-      kelasBaru: kelasBaruInfo?.name
-    }, { status: 200 });
+      
+      throw error;
+    }
 
   } catch (error) {
     console.error("[NAIK_KELAS_ERROR]", error);
