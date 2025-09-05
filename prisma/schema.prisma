@@ -114,7 +114,7 @@ model Transaksi {
   updatedAt    DateTime        @updatedAt @map("updated_at")
 
   santri       Santri          @relation(fields: [santriId], references: [id], onDelete: Cascade)
-  tagihan      Tagihan?        @relation(fields: [tagihanId], references: [id])
+  tagihan      Tagihan?        @relation(fields: [tagihanId], references: [id], onDelete: Cascade)
 
   @@map("transaksi")
 }
@@ -199,5 +199,6 @@ enum JenisNotifikasi {
   sistem
 
   // Tambahan
-  naik_kelas
+  naik_kelasasdas
+  tagihan_dipindah
 }
