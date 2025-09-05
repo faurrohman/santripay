@@ -9,7 +9,7 @@ const pembayaranSchema = z.object({
   tagihanId: z.string().uuid("Pilih tagihan yang valid"),
   amount: z.coerce.number().min(0, "Jumlah harus lebih dari atau sama dengan 0"),
   note: z.string().optional(),
-  paymentMethod: z.string().optional(),
+  paymentMethod: z.enum(["cash", "transfer", "qris", "midtrans"]).optional(),
 });
 
 // Fungsi untuk mengkonversi BigInt ke string

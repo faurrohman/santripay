@@ -77,12 +77,22 @@ interface Kelas {
   name: string;
   level?: string;
   tahunAjaran?: { id: string; name: string; aktif?: boolean };
+  _count?: { santri: number };
 }
 
 interface TahunAjaran {
   id: string;
   name: string;
   aktif: boolean;
+}
+
+interface Santri {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  createdAt: string;
 }
 
 const kelasFormSchema = z.object({
@@ -100,6 +110,7 @@ export default function KelasPage() {
   const [editingKelas, setEditingKelas] = React.useState<Kelas | null>(null);
   const [deletingKelasId, setDeletingKelasId] = React.useState<string | null>(null);
   const [showingDetailKelas, setShowingDetailKelas] = React.useState<Kelas | null>(null);
+  const [showingSantriKelas, setShowingSantriKelas] = React.useState<Kelas | null>(null);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
@@ -128,6 +139,16 @@ export default function KelasPage() {
   const { data: tahunAjaranList = [], isLoading: loadingTahunAjaran } = useQuery<TahunAjaran[]>({
     queryKey: ["tahun-ajaran"],
     queryFn: () => fetch("/api/tahun-ajaran").then((res) => res.json()),
+  });
+
+  // Query santri berdasarkan kelas
+  const { 
+    data: santriKelasData = [], 
+    isLoading: isLoadingSantriKelas 
+  } = useQuery<Santri[]>({
+    queryKey: ["santri-kelas", showingSantriKelas?.id],
+    queryFn: () => fetch(`/api/santri?kelasId=${showingSantriKelas?.id}`).then((res) => res.json()),
+    enabled: !!showingSantriKelas?.id,
   });
 
   // Mutation hooks
@@ -258,6 +279,20 @@ export default function KelasPage() {
       ),
     },
     {
+      id: "jumlahSantri",
+      header: "Jumlah Santri",
+      cell: ({ row }: { row: Row<Kelas> }) => (
+        <div className="text-center">
+          <button
+            onClick={() => handleShowSantriKelas(row.original)}
+            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors cursor-pointer"
+          >
+            {row.original._count?.santri || 0} santri
+          </button>
+        </div>
+      ),
+    },
+    {
       id: "statusTahunAjaran",
       header: "Status Tahun Ajaran",
       cell: ({ row }: { row: Row<Kelas> }) => (
@@ -358,6 +393,10 @@ export default function KelasPage() {
     setShowingDetailKelas(kelas);
   };
 
+  const handleShowSantriKelas = (kelas: Kelas) => {
+    setShowingSantriKelas(kelas);
+  };
+
   if (isLoadingKelas) return (
     <div className="flex flex-col flex-1 gap-4 p-4 pt-0 mt-6 max-w-[1400px] mx-auto w-full pb-8">
       <header className="flex h-14 shrink-0 items-center justify-between w-full">
@@ -412,6 +451,7 @@ export default function KelasPage() {
                     <th className="px-2 py-2 text-left">Nama</th>
                     <th className="px-2 py-2 text-left">Level</th>
                     <th className="px-2 py-2 text-left">Tahun Ajaran</th>
+                    <th className="px-2 py-2 text-left">Jumlah Santri</th>
                     <th className="px-2 py-2 text-left">Aksi</th>
                   </tr>
                 </thead>
@@ -422,6 +462,7 @@ export default function KelasPage() {
                       <td className="px-2 py-2"><Skeleton className="h-4 w-32" /></td>
                       <td className="px-2 py-2"><Skeleton className="h-4 w-20" /></td>
                       <td className="px-2 py-2"><Skeleton className="h-4 w-32" /></td>
+                      <td className="px-2 py-2"><Skeleton className="h-4 w-24" /></td>
                       <td className="px-2 py-2"><Skeleton className="h-8 w-20" /></td>
                     </tr>
                   ))}
@@ -659,6 +700,14 @@ export default function KelasPage() {
                 <div className="text-right font-medium">Tahun Ajaran</div>
                 <div className="col-span-3">{showingDetailKelas.tahunAjaran?.name || "-"}</div>
               </div>
+              <div className="grid grid-cols-4 items-center gap-4 mb-2">
+                <div className="text-right font-medium">Jumlah Santri</div>
+                <div className="col-span-3">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    {showingDetailKelas._count?.santri || 0} santri
+                  </span>
+                </div>
+              </div>
             </div>
           )}
           <DialogFooter>
@@ -670,6 +719,73 @@ export default function KelasPage() {
             <Button onClick={() => setShowingDetailKelas(null)}>Tutup</Button>
           </DialogFooter>
           </ScrollArea>
+        </DialogContent>
+              </Dialog>
+
+      <Dialog open={!!showingSantriKelas} onOpenChange={() => setShowingSantriKelas(null)}>
+        <DialogContent className="sm:max-w-[800px] max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>Daftar Santri - {showingSantriKelas?.name}</DialogTitle>
+            <DialogDescription>
+              Daftar santri yang berada di kelas {showingSantriKelas?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh]">
+            {isLoadingSantriKelas ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>No</TableHead>
+                    <TableHead>Nama</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Telepon</TableHead>
+                    <TableHead>Alamat</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {[...Array(5)].map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell><Skeleton className="h-4 w-6" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-48" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-40" /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : santriKelasData.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>No</TableHead>
+                    <TableHead>Nama</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Telepon</TableHead>
+                    <TableHead>Alamat</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {santriKelasData.map((santri, index) => (
+                    <TableRow key={santri.id}>
+                      <TableCell>{index + 1}</TableCell>
+                      <TableCell className="font-medium">{santri.name}</TableCell>
+                      <TableCell>{santri.email || "-"}</TableCell>
+                      <TableCell>{santri.phone || "-"}</TableCell>
+                      <TableCell className="max-w-[200px] truncate">
+                        {santri.address || "-"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-muted-foreground">Tidak ada santri di kelas ini</p>
+              </div>
+            )}
+          </ScrollArea>
+         
         </DialogContent>
       </Dialog>
 

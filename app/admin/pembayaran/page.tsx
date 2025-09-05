@@ -1,6 +1,6 @@
 "use client"
 
-import { ArrowLeft, Menu } from "lucide-react"
+import { ArrowLeft, Menu, Download, FileText, Printer } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -8,6 +8,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
@@ -89,6 +90,7 @@ export default function PembayaranPage() {
   const [selectedPembayaran, setSelectedPembayaran] = useState<Pembayaran | null>(null)
   const [rejectionNote, setRejectionNote] = useState("")
   const [showDetail, setShowDetail] = useState<Pembayaran | null>(null)
+  const [showStruk, setShowStruk] = useState<Pembayaran | null>(null)
   const [filterNama, setFilterNama] = useState("");
   const [filterKelas, setFilterKelas] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
@@ -171,6 +173,259 @@ export default function PembayaranPage() {
       default:
         return <Badge variant="outline">{status}</Badge>
     }
+  }
+
+  const generateStrukPDF = async (pembayaran: Pembayaran) => {
+    try {
+      toast.loading('Mengambil data struk...', { id: 'struk-loading' })
+      
+      const response = await fetch('/api/pembayaran/struk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ pembayaranId: pembayaran.id }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Gagal mengambil data struk')
+      }
+
+      const htmlContent = await response.text()
+      
+      // Create a blob with the HTML content
+      const blob = new Blob([htmlContent], { type: 'text/html' })
+      const url = window.URL.createObjectURL(blob)
+      
+      // Create a temporary link element to trigger download
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `struk-pembayaran-${pembayaran.santri.name}-${new Date().toISOString().split('T')[0]}.html`
+      
+      // Append to body, click, and remove
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      
+      // Clean up the URL object
+      window.URL.revokeObjectURL(url)
+      
+      toast.dismiss('struk-loading')
+      toast.success('Struk berhasil didownload! File HTML tersimpan di folder Downloads.')
+      
+    } catch (error) {
+      console.error('Error generating PDF:', error)
+      toast.dismiss('struk-loading')
+      toast.error('Gagal download struk')
+    }
+  }
+
+  const printStruk = (pembayaran: Pembayaran) => {
+    // Quick print using frontend data (no API call)
+    toast.loading('Mempersiapkan struk untuk print...', { id: 'print-loading' })
+    
+    const printWindow = window.open('', '_blank', 'width=600,height=800,scrollbars=yes,resizable=yes')
+    if (!printWindow) {
+      toast.dismiss('print-loading')
+      toast.error('Popup diblokir. Silakan izinkan popup untuk situs ini.')
+      return
+    }
+
+    const strukContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Struk Pembayaran - ${pembayaran.santri.name}</title>
+        <meta charset="utf-8">
+        <style>
+          * { box-sizing: border-box; }
+          body { 
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 15px;
+            background: white;
+            color: #000;
+            line-height: 1.4;
+            font-size: 12px;
+          }
+          .struk {
+            border: 1px solid #000;
+            padding: 0;
+            max-width: 400px;
+            margin: 0 auto;
+            background: white;
+          }
+          .header {
+            text-align: center;
+            border-bottom: 1px solid #000;
+            padding: 15px 10px;
+            background: #f8f9fa;
+          }
+          .header h1 {
+            margin: 0 0 5px 0;
+            font-size: 16px;
+            font-weight: bold;
+            text-transform: uppercase;
+          }
+          .header p {
+            margin: 0;
+            font-size: 12px;
+            color: #666;
+          }
+          .content {
+            padding: 15px 10px;
+          }
+          .row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            border-bottom: 1px dotted #ccc;
+            font-size: 11px;
+          }
+          .row:last-child {
+            border-bottom: none;
+          }
+          .label {
+            font-weight: bold;
+            flex: 1;
+          }
+          .value {
+            text-align: right;
+            flex: 1;
+          }
+          .amount-row {
+            border-top: 2px solid #000;
+            border-bottom: 2px solid #000;
+            padding: 8px 0;
+            margin: 8px 0;
+          }
+          .amount-row .label {
+            font-size: 14px;
+            font-weight: bold;
+          }
+          .amount-row .value {
+            font-size: 16px;
+            font-weight: bold;
+          }
+          .footer {
+            text-align: center;
+            border-top: 1px solid #000;
+            padding: 10px;
+            background: #f8f9fa;
+            font-size: 10px;
+          }
+          .footer p {
+            margin: 2px 0;
+          }
+          .note {
+            margin-top: 10px;
+            padding: 8px;
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            font-size: 10px;
+          }
+          @media print {
+            body { margin: 0; padding: 5px; }
+            .struk { border: 1px solid #000 !important; }
+            .no-print { display: none !important; }
+            @page { margin: 0.3in; size: A5; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="struk">
+          <div class="header">
+            <h1>STRUK PEMBAYARAN</h1>
+            <p>Pondok Pesantren SantriPay</p>
+          </div>
+          
+          <div class="content">
+            <div class="row">
+              <span class="label">No. Transaksi:</span>
+              <span class="value">${pembayaran.id}</span>
+            </div>
+            
+            <div class="row">
+              <span class="label">Tanggal:</span>
+              <span class="value">${new Date(pembayaran.paymentDate).toLocaleString('id-ID')}</span>
+            </div>
+            
+            <div class="row">
+              <span class="label">Santri:</span>
+              <span class="value">${pembayaran.santri.name}</span>
+            </div>
+            
+            <div class="row">
+              <span class="label">Kelas:</span>
+              <span class="value">${pembayaran.santri.kelas.name}</span>
+            </div>
+            
+            <div class="row">
+              <span class="label">Tagihan:</span>
+              <span class="value">${pembayaran.tagihan?.jenisTagihan?.name || '-'}</span>
+            </div>
+            
+            <div class="row amount-row">
+              <span class="label">JUMLAH:</span>
+              <span class="value">${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(pembayaran.amount)}</span>
+            </div>
+            
+            <div class="row">
+              <span class="label">Metode:</span>
+              <span class="value">${pembayaran.paymentMethod || 'Manual'}</span>
+            </div>
+            
+            <div class="row">
+              <span class="label">Status:</span>
+              <span class="value" style="font-weight: bold; color: ${pembayaran.status === 'approved' ? 'green' : pembayaran.status === 'rejected' ? 'red' : 'orange'};">
+                ${pembayaran.status === 'approved' ? 'DISETUJUI' : pembayaran.status === 'rejected' ? 'DITOLAK' : 'MENUNGGU'}
+              </span>
+            </div>
+            
+            ${pembayaran.note ? `
+            <div class="note">
+              <strong>Catatan:</strong><br>
+              ${pembayaran.note}
+            </div>
+            ` : ''}
+          </div>
+          
+          <div class="footer">
+            <p><strong>Struk ini adalah bukti pembayaran yang sah</strong></p>
+            <p>Dicetak: ${new Date().toLocaleString('id-ID')}</p>
+            <p>SantriPay - Sistem Pembayaran Digital</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+
+    printWindow.document.write(strukContent)
+    printWindow.document.close()
+    
+    toast.dismiss('print-loading')
+    
+    // Quick print with auto-close
+    setTimeout(() => {
+      try {
+        printWindow.focus()
+        printWindow.print()
+        
+        toast.success('Struk siap untuk dicetak')
+        
+        // Auto-close after print (for quick printing)
+        setTimeout(() => {
+          if (!printWindow.closed) {
+            printWindow.close()
+          }
+        }, 2000)
+        
+      } catch (printError) {
+        console.error('Print error:', printError)
+        toast.error('Gagal membuka dialog print')
+        printWindow.close()
+      }
+    }, 300) // Faster for quick printing
   }
 
   const filteredPembayaran = (pembayaran || []).filter((item) => {
@@ -412,6 +667,14 @@ export default function PembayaranPage() {
                             >
                               Lihat Detail
                             </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setShowStruk(item)}
+                            >
+                              <FileText className="h-4 w-4 mr-1" />
+                              Struk
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -427,47 +690,185 @@ export default function PembayaranPage() {
       {showDetail && (
         <Dialog open={!!showDetail} onOpenChange={() => setShowDetail(null)}>
           <DialogContent className="sm:max-w-[425px]">
-            <ScrollArea className="max-h-[70vh]">
-              <DialogHeader>
-                <DialogTitle>Detail Pembayaran</DialogTitle>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-4 items-center gap-4 mb-2">
-                  <div className="text-right font-medium">Santri</div>
-                  <div className="col-span-3">{showDetail.santri.name}</div>
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4 mb-2">
-                  <div className="text-right font-medium">Kelas</div>
-                  <div className="col-span-3">{showDetail.santri.kelas.name}</div>
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4 mb-2">
-                  <div className="text-right font-medium">Jenis Tagihan</div>
-                  <div className="col-span-3">{showDetail.tagihan?.jenisTagihan?.name || "-"}</div>
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4 mb-2">
-                  <div className="text-right font-medium">Jumlah</div>
-                  <div className="col-span-3">{new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR" }).format(showDetail.amount)}</div>
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4 mb-2">
-                  <div className="text-right font-medium">Tanggal</div>
-                  <div className="col-span-3">{new Date(showDetail.paymentDate).toLocaleString("id-ID")}</div>
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4 mb-2">
-                  <div className="text-right font-medium">Metode Pembayaran</div>
-                  <div className="col-span-3">{showDetail.paymentMethod || "-"}</div>
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4 mb-2">
-                  <div className="text-right font-medium">Status</div>
-                  <div className="col-span-3">{getStatusBadge(showDetail.status)}</div>
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <div className="text-right font-medium">Catatan</div>
-                  <div className="col-span-3">{showDetail.note || "-"}</div>
+            <ScrollArea className="max-h-[60vh] overflow-y-auto">
+              <div className="pr-4">
+                <DialogHeader>
+                  <DialogTitle>Detail Pembayaran</DialogTitle>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <div className="grid grid-cols-4 items-center gap-4 mb-2">
+                    <div className="text-right font-medium">Santri</div>
+                    <div className="col-span-3 break-words">{showDetail.santri.name}</div>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4 mb-2">
+                    <div className="text-right font-medium">Kelas</div>
+                    <div className="col-span-3 break-words">{showDetail.santri.kelas.name}</div>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4 mb-2">
+                    <div className="text-right font-medium">Jenis Tagihan</div>
+                    <div className="col-span-3 break-words">{showDetail.tagihan?.jenisTagihan?.name || "-"}</div>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4 mb-2">
+                    <div className="text-right font-medium">Jumlah</div>
+                    <div className="col-span-3 break-words">{new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR" }).format(showDetail.amount)}</div>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4 mb-2">
+                    <div className="text-right font-medium">Tanggal</div>
+                    <div className="col-span-3 break-words">{new Date(showDetail.paymentDate).toLocaleString("id-ID")}</div>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4 mb-2">
+                    <div className="text-right font-medium">Metode Pembayaran</div>
+                    <div className="col-span-3 break-words">{showDetail.paymentMethod || "-"}</div>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4 mb-2">
+                    <div className="text-right font-medium">Status</div>
+                    <div className="col-span-3">{getStatusBadge(showDetail.status)}</div>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <div className="text-right font-medium">Catatan</div>
+                    <div className="col-span-3 break-words">{showDetail.note || "-"}</div>
+                  </div>
                 </div>
               </div>
             </ScrollArea>
             <DialogFooter>
               <Button onClick={() => setShowDetail(null)}>Tutup</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {showStruk && (
+        <Dialog open={!!showStruk} onOpenChange={() => setShowStruk(null)}>
+          <DialogContent className="sm:max-w-[700px] max-h-[90vh]">
+            <DialogHeader>
+              <DialogTitle>Struk Validasi Pembayaran</DialogTitle>
+              <DialogDescription>
+                Struk pembayaran untuk {showStruk.santri.name}
+              </DialogDescription>
+            </DialogHeader>
+            
+            <ScrollArea className="max-h-[60vh] overflow-y-auto">
+              <div className="pr-4">
+                <Card className="print:shadow-none print:border-2 print:border-black">
+                  <CardHeader className="text-center border-b-2 border-primary pb-4 mb-6">
+                    <CardTitle className="text-2xl font-bold tracking-wide">
+                      STRUK VALIDASI PEMBAYARAN
+                    </CardTitle>
+                    <CardDescription className="text-base font-medium">
+                      Pondok Pesantren SantriPay
+                    </CardDescription>
+                  </CardHeader>
+                  
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-1 gap-4">
+                      <div className="flex justify-between items-center py-2 border-b border-dashed">
+                        <Label className="font-semibold text-sm">No. Transaksi:</Label>
+                        <Badge variant="outline" className="font-mono text-xs">
+                          {showStruk.id}
+                        </Badge>
+                      </div>
+                      
+                      <div className="flex justify-between items-center py-2 border-b border-dashed">
+                        <Label className="font-semibold text-sm">Tanggal:</Label>
+                        <span className="text-sm">
+                          {new Date(showStruk.paymentDate).toLocaleString('id-ID')}
+                        </span>
+                      </div>
+                      
+                      <div className="flex justify-between items-center py-2 border-b border-dashed">
+                        <Label className="font-semibold text-sm">Nama Santri:</Label>
+                        <span className="text-sm font-medium">{showStruk.santri.name}</span>
+                      </div>
+                      
+                      <div className="flex justify-between items-center py-2 border-b border-dashed">
+                        <Label className="font-semibold text-sm">Kelas:</Label>
+                        <Badge variant="secondary" className="text-xs">
+                          {showStruk.santri.kelas.name}
+                        </Badge>
+                      </div>
+                      
+                      <div className="flex justify-between items-center py-2 border-b border-dashed">
+                        <Label className="font-semibold text-sm">Jenis Tagihan:</Label>
+                        <span className="text-sm">{showStruk.tagihan?.jenisTagihan?.name || '-'}</span>
+                      </div>
+                      
+                      <div className="flex justify-between items-center py-3 border-b-2 border-primary">
+                        <Label className="font-bold text-base">Jumlah:</Label>
+                        <span className="text-lg font-bold text-primary">
+                          {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(showStruk.amount)}
+                        </span>
+                      </div>
+                      
+                      <div className="flex justify-between items-center py-2 border-b border-dashed">
+                        <Label className="font-semibold text-sm">Metode Pembayaran:</Label>
+                        <Badge variant="outline" className="text-xs">
+                          {showStruk.paymentMethod || 'Manual'}
+                        </Badge>
+                      </div>
+                      
+                      <div className="flex justify-between items-center py-2 border-b border-dashed">
+                        <Label className="font-semibold text-sm">Status:</Label>
+                        <Badge 
+                          variant={
+                            showStruk.status === 'approved' ? 'default' : 
+                            showStruk.status === 'rejected' ? 'destructive' : 
+                            'outline'
+                          }
+                          className="text-xs font-bold"
+                        >
+                          {showStruk.status === 'approved' ? 'DISETUJUI' : 
+                           showStruk.status === 'rejected' ? 'DITOLAK' : 
+                           'MENUNGGU'}
+                        </Badge>
+                      </div>
+                      
+                      {showStruk.note && (
+                        <div className="mt-4 p-3 bg-muted rounded-lg">
+                          <Label className="font-semibold text-sm block mb-2">Catatan:</Label>
+                          <p className="text-sm text-muted-foreground break-words">{showStruk.note}</p>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                  
+                  <CardFooter className="text-center border-t-2 border-primary pt-4 mt-6">
+                    <div className="w-full space-y-2">
+                      <p className="text-sm font-medium text-muted-foreground">
+                        Struk ini adalah bukti validasi pembayaran yang sah
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Dicetak pada: {new Date().toLocaleString('id-ID')}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Pondok Pesantren SantriPay - Sistem Pembayaran Digital
+                      </p>
+                    </div>
+                  </CardFooter>
+                </Card>
+              </div>
+            </ScrollArea>
+            
+            <DialogFooter className="flex gap-2 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => printStruk(showStruk)}
+                className="flex-1"
+              >
+                <Printer className="h-4 w-4 mr-2" />
+                Print Cepat
+              </Button>
+              <Button
+                variant="default"
+                onClick={() => generateStrukPDF(showStruk)}
+                className="flex-1"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download Struk
+              </Button>
+              <Button onClick={() => setShowStruk(null)}>
+                Tutup
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

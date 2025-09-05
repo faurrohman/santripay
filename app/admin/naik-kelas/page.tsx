@@ -90,6 +90,9 @@ export default function NaikKelasPage() {
   const [kelasBaru, setKelasBaru] = useState<string | null>(null);
   // State loading untuk data kelas
   const [loadingKelas, setLoadingKelas] = useState(true);
+  
+  // State untuk loading proses naik kelas
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // Tambahkan fungsi untuk mengecek apakah semua santri dipilih
   const isAllSelected = santriList.length > 0 && 
@@ -266,6 +269,9 @@ export default function NaikKelasPage() {
       }
     }
 
+    // Mulai proses naik kelas
+    setIsProcessing(true);
+
     try {
       const response = await fetch('/api/santri/naik-kelas', {
         method: 'POST',
@@ -289,11 +295,19 @@ export default function NaikKelasPage() {
       const kelasLamaInfo = kelasList.find(k => k.id === kelasLama);
       const kelasBaruInfo = kelasList.find(k => k.id === kelasBaru);
 
+      // Buat pesan sukses dengan informasi tagihan
+      let successMessage = `${responseData.santriDinaikan} santri dipindahkan dari kelas ${kelasLamaInfo?.name || 'Lama'}${kelasLamaInfo?.level ? ` (${kelasLamaInfo.level})` : ''}${kelasLamaInfo?.tahunAjaran ? ` - ${kelasLamaInfo.tahunAjaran.name}` : ''} ke kelas ${kelasBaruInfo?.name || 'Baru'}${kelasBaruInfo?.level ? ` (${kelasBaruInfo.level})` : ''}${kelasBaruInfo?.tahunAjaran ? ` - ${kelasBaruInfo.tahunAjaran.name}` : ''}`;
+      
+      if (responseData.tagihanDipindah && responseData.tagihanDipindah > 0) {
+        const statusTahunAjaran = responseData.tahunAjaranAktif ? 'aktif' : 'tidak aktif';
+        successMessage += `\n\n📋 ${responseData.tagihanDipindah} tagihan berhasil dipindah ke kelas baru (tahun ajaran ${responseData.tahunAjaranBaru || 'baru'} - ${statusTahunAjaran}).`;
+      }
+
       toast.success(
         `Berhasil naik kelas`, 
         {
-          description: `${responseData.santriDinaikan} santri dipindahkan dari kelas ${kelasLamaInfo?.name || 'Lama'}${kelasLamaInfo?.level ? ` (${kelasLamaInfo.level})` : ''}${kelasLamaInfo?.tahunAjaran ? ` - ${kelasLamaInfo.tahunAjaran.name}` : ''} ke kelas ${kelasBaruInfo?.name || 'Baru'}${kelasBaruInfo?.level ? ` (${kelasBaruInfo.level})` : ''}${kelasBaruInfo?.tahunAjaran ? ` - ${kelasBaruInfo.tahunAjaran.name}` : ''}`,
-          duration: 5000
+          description: successMessage,
+          duration: 7000
         }
       );
       
@@ -322,6 +336,8 @@ export default function NaikKelasPage() {
         duration: 5000
       });
       console.error(error);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -464,15 +480,49 @@ export default function NaikKelasPage() {
               setKelasLama(null);
               setKelasBaru(null);
             }}
+            disabled={isProcessing}
           >
             Reset
           </Button>
           <Button 
             onClick={handleNaikKelas} 
-            disabled={!kelasLama || !kelasBaru || selectedSantri.length === 0}
+            disabled={!kelasLama || !kelasBaru || selectedSantri.length === 0 || isProcessing}
           >
-            Naik Kelas
+{isProcessing ? "Memproses..." : "Naik Kelas"}
           </Button>
+        </div>
+      </div>
+    );
+  };
+
+  // Render loading overlay
+  const renderLoadingOverlay = () => {
+    if (!isProcessing) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+          <div className="text-center space-y-4">
+            {/* Loading Icon */}
+            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto"></div>
+            
+            {/* Title */}
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Sedang Memproses Kenaikan Kelas
+            </h3>
+            
+            {/* Message */}
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              Memproses {selectedSantri.length} santri...
+            </p>
+            
+            {/* Info */}
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              ⏱️ Proses ini memakan waktu beberapa menit untuk jumlah santri yang besar.
+              <br />
+              Jangan tutup halaman ini sampai selesai.
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -655,6 +705,26 @@ export default function NaikKelasPage() {
           {renderFooter()}
         </CardContent>
       </Card>
+      {isProcessing && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="text-center space-y-4">
+              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto"></div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Sedang Memproses Kenaikan Kelas
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                Memproses {selectedSantri.length} santri...
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                ⏱️ Proses ini memakan waktu beberapa menit untuk jumlah santri yang besar.
+                <br />
+                Jangan tutup halaman ini sampai selesai.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

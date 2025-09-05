@@ -158,7 +158,17 @@ export async function POST(req: Request) {
       }),
       prisma.kelas.findUnique({
         where: { id: kelasBaru },
-        select: { name: true, level: true }
+        select: { 
+          name: true, 
+          level: true,
+          tahunAjaranId: true,
+          tahunAjaran: {
+            select: {
+              name: true,
+              aktif: true
+            }
+          }
+        }
       })
     ]);
 
@@ -230,12 +240,12 @@ export async function POST(req: Request) {
         
         const riwayatPromises = batch.map(santriId =>
           prisma.riwayatKelas.create({
-            data: {
+            data: { 
               santriId,
-              kelasLamaId,
-              kelasBaruId: kelasBaru,
-              tanggal: new Date()
-            }
+                  kelasLamaId,
+                  kelasBaruId: kelasBaru,
+                  tanggal: new Date()
+                }
           })
         );
         
@@ -290,14 +300,117 @@ export async function POST(req: Request) {
       }
       
       console.log(`[NAIK_KELAS] ✅ Total ${totalNotifikasi} notifikasi berhasil dibuat`);
-      console.log(`[NAIK_KELAS] 🎉 Semua operasi berhasil!`);
+
+      // 4. Pindahkan tagihan dari kelas lama ke kelas baru
+      console.log(`[NAIK_KELAS] Memulai pemindahan tagihan dari kelas ${kelasLamaId} ke kelas ${kelasBaru}...`);
       
-      return NextResponse.json({ 
-        message: "Proses kenaikan kelas berhasil", 
-        santriDinaikan: santriIds.length,
-        kelasLama: kelasLamaInfo?.name,
-        kelasBaru: kelasBaruInfo?.name
-      }, { status: 200 });
+      // Cari semua tagihan yang terkait dengan santri yang naik kelas
+      const tagihanToMove = await prisma.tagihan.findMany({
+        where: {
+          santriId: { in: santriIds },
+          status: {
+            not: 'paid' // Hanya tagihan yang belum lunas
+          }
+        },
+        select: {
+          id: true,
+          santriId: true,
+          jenisTagihanId: true,
+          amount: true,
+          dueDate: true,
+          status: true,
+          description: true,
+          createdAt: true,
+          updatedAt: true
+        }
+      });
+
+      console.log(`[NAIK_KELAS] 📋 Ditemukan ${tagihanToMove.length} tagihan yang akan dipindah`);
+      console.log(`[NAIK_KELAS] 📅 Tagihan akan dipindah ke tahun ajaran: ${kelasBaruInfo?.tahunAjaran?.name || 'Tidak ada tahun ajaran'} (ID: ${kelasBaruInfo?.tahunAjaranId || 'null'}) - Status: ${kelasBaruInfo?.tahunAjaran?.aktif ? 'AKTIF' : 'TIDAK AKTIF'}`);
+
+      if (tagihanToMove.length > 0) {
+        // Buat tagihan baru di kelas baru untuk setiap tagihan yang ada
+        const newTagihanPromises = tagihanToMove.map(tagihan =>
+          prisma.tagihan.create({
+            data: {
+              santriId: tagihan.santriId,
+              jenisTagihanId: tagihan.jenisTagihanId,
+              amount: tagihan.amount,
+              dueDate: tagihan.dueDate,
+              status: tagihan.status,
+              description: tagihan.description ? `${tagihan.description} (Dipindah dari kelas lama ke ${kelasBaruInfo?.tahunAjaran?.name || 'tahun ajaran baru'})` : `Dipindah dari kelas lama ke ${kelasBaruInfo?.tahunAjaran?.name || 'tahun ajaran baru'}`,
+              tahunAjaranId: kelasBaruInfo?.tahunAjaranId || null, // Set tahun ajaran sesuai kelas baru
+              createdAt: tagihan.createdAt,
+              updatedAt: new Date()
+            }
+          })
+        );
+
+        const newTagihanResults = await Promise.all(newTagihanPromises);
+        console.log(`[NAIK_KELAS] ✅ ${newTagihanResults.length} tagihan baru berhasil dibuat di kelas baru`);
+
+        // Hapus tagihan lama
+        const deleteTagihanResult = await prisma.tagihan.deleteMany({
+          where: {
+            id: { in: tagihanToMove.map(t => t.id) }
+          }
+        });
+
+        console.log(`[NAIK_KELAS] ✅ ${deleteTagihanResult.count} tagihan lama berhasil dihapus`);
+
+        // Buat notifikasi untuk tagihan yang dipindah
+        console.log(`[NAIK_KELAS] Membuat notifikasi untuk tagihan yang dipindah...`);
+        
+        for (let i = 0; i < santriIds.length; i += BATCH_SIZE) {
+          const batch = santriIds.slice(i, i + BATCH_SIZE);
+          const batchTagihan = tagihanToMove.filter(t => batch.includes(t.santriId));
+          
+          if (batchTagihan.length > 0) {
+            const notifikasiTagihanPromises = batch.map(async (santriId) => {
+              const santri = await prisma.santri.findUnique({
+                where: { id: santriId },
+                include: { user: true }
+              });
+              
+              if (santri?.user) {
+                return prisma.notifikasi.create({
+                  data: {
+                    userId: santri.user.id,
+                    title: "Tagihan Dipindah",
+                    message: `Tagihan Anda telah dipindah ke kelas baru (${kelasBaruInfo?.name || 'Kelas Baru'}) tahun ajaran ${kelasBaruInfo?.tahunAjaran?.name || 'baru'} (${kelasBaruInfo?.tahunAjaran?.aktif ? 'aktif' : 'tidak aktif'}) karena kenaikan kelas. Silakan periksa tagihan terbaru Anda.`,
+                    type: 'tagihan_dipindah',
+                    role: 'santri',
+                    isRead: false
+                  }
+                });
+              }
+              return null;
+            });
+            
+            const notifikasiTagihanResults = await Promise.all(notifikasiTagihanPromises);
+            const batchNotifikasiTagihan = notifikasiTagihanResults.filter(Boolean).length;
+            console.log(`[NAIK_KELAS] ✅ Notifikasi tagihan batch ${Math.floor(i/BATCH_SIZE) + 1} berhasil (${batchNotifikasiTagihan} notifikasi)`);
+          }
+          
+          if (i + BATCH_SIZE < santriIds.length) {
+            await delay(DELAY_MS);
+          }
+        }
+      } else {
+        console.log(`[NAIK_KELAS] ℹ️ Tidak ada tagihan yang perlu dipindah`);
+      }
+
+      console.log(`[NAIK_KELAS] 🎉 Semua operasi berhasil!`);
+
+    return NextResponse.json({ 
+      message: "Proses kenaikan kelas berhasil", 
+      santriDinaikan: santriIds.length,
+      kelasLama: kelasLamaInfo?.name,
+      kelasBaru: kelasBaruInfo?.name,
+      tahunAjaranBaru: kelasBaruInfo?.tahunAjaran?.name,
+      tahunAjaranAktif: kelasBaruInfo?.tahunAjaran?.aktif,
+      tagihanDipindah: tagihanToMove.length
+    }, { status: 200 });
 
     } catch (error) {
       console.error("[NAIK_KELAS_OPERATION_ERROR]", error);
