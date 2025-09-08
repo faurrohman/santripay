@@ -23,8 +23,14 @@ export async function GET(req: Request) {
     const tahunAjaranId = searchParams.get("tahunAjaranId");
     const where = tahunAjaranId ? { tahunAjaranId } : {};
     const kelas = await prisma.kelas.findMany({
+      where,
       include: {
         tahunAjaran: true,
+        _count: {
+          select: {
+            santri: true
+          }
+        }
       },
       orderBy: [
         { tahunAjaran: { name: 'asc' } },
