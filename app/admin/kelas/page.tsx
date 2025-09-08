@@ -723,15 +723,16 @@ export default function KelasPage() {
               </Dialog>
 
       <Dialog open={!!showingSantriKelas} onOpenChange={() => setShowingSantriKelas(null)}>
-        <DialogContent className="sm:max-w-[800px] max-h-[80vh]">
+        <DialogContent className="w-[95vw] sm:max-w-[900px] max-h-[80vh] overflow-x-auto overflow-y-hidden">
           <DialogHeader>
             <DialogTitle>Daftar Santri - {showingSantriKelas?.name}</DialogTitle>
             <DialogDescription>
               Daftar santri yang berada di kelas {showingSantriKelas?.name}
             </DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-[60vh]">
+          <ScrollArea className="max-h-[60vh] pr-2">
             {isLoadingSantriKelas ? (
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -754,7 +755,9 @@ export default function KelasPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             ) : santriKelasData.length > 0 ? (
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -770,7 +773,7 @@ export default function KelasPage() {
                     <TableRow key={santri.id}>
                       <TableCell>{index + 1}</TableCell>
                       <TableCell className="font-medium">{santri.name}</TableCell>
-                      <TableCell>{santri.email || "-"}</TableCell>
+                        <TableCell className="max-w-[240px] truncate">{santri.email || "-"}</TableCell>
                       <TableCell>{santri.phone || "-"}</TableCell>
                       <TableCell className="max-w-[200px] truncate">
                         {santri.address || "-"}
@@ -779,6 +782,7 @@ export default function KelasPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             ) : (
               <div className="text-center py-8">
                 <p className="text-muted-foreground">Tidak ada santri di kelas ini</p>
