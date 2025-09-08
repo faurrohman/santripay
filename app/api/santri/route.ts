@@ -18,7 +18,7 @@ const santriSchema = z.object({
   alamat: z.string().optional(),
 });
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     
@@ -29,7 +29,12 @@ export async function GET() {
       );
     }
 
+    // Baca query params untuk filter opsional
+    const { searchParams } = new URL(req.url);
+    const kelasId = searchParams.get('kelasId');
+
     const santriFull = await prisma.santri.findMany({ 
+      where: kelasId ? { kelasId } : undefined,
       select: {
         id: true,
         name: true,
@@ -63,6 +68,23 @@ export async function GET() {
         name: 'asc'
       }
     });
+
+    // Jika diminta khusus per kelas, kembalikan bentuk ringan yang cocok dengan UI admin/kelas
+    if (kelasId) {
+      const simplified = santriFull.map((s) => ({
+        id: s.id,
+        name: s.name,
+        email: s.user?.email ?? null,
+        phone: s.phone ?? null,
+        address: s.alamat ?? null,
+      }));
+      return NextResponse.json(simplified, { 
+        status: 200,
+        headers: {
+          'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=59',
+        }
+      });
+    }
 
     return NextResponse.json(santriFull, { 
       status: 200,
