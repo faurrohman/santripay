@@ -6,16 +6,14 @@ import { z } from "zod";
 import Papa from "papaparse";
 import bcrypt from "bcryptjs";
 import * as XLSX from "xlsx";
+import { generateNIS } from "@/lib/nis-generator";
 
 const santriImportSchema = z.object({
   username: z.string().min(1, "Username tidak boleh kosong"),
   email: z.string().email("Email tidak valid"),
   password: z.string().min(6, "Password minimal 6 karakter"),
   name: z.string().min(1, "Nama tidak boleh kosong"),
-  santriId: z.string()
-    .min(1, "ID Santri tidak boleh kosong")
-    .max(20, "ID Santri maksimal 20 karakter")
-    .regex(/^[A-Za-z0-9\-_]+$/, "ID Santri hanya boleh berisi huruf, angka, tanda hubung, dan underscore"),
+  // santriId akan dibuat otomatis dengan generateNIS
   kelas: z.string().min(1, "Kelas tidak boleh kosong"),
   tahunAjaran: z.string().min(1, "Tahun ajaran tidak boleh kosong"),
   phone: z.string().optional(),
@@ -80,12 +78,11 @@ async function validateImportData(rows: any[], preview: boolean = false) {
       // Validasi data dengan schema
         const data = santriImportSchema.parse(row);
 
-      // Cek duplikasi username/email/santriId juga saat preview
+      // Cek duplikasi username/email juga saat preview
       if (preview) {
-        const [existingUser, existingEmail, existingSantri] = await Promise.all([
+        const [existingUser, existingEmail] = await Promise.all([
           prisma.user.findUnique({ where: { username: data.username } }),
           prisma.user.findUnique({ where: { email: data.email } }),
-          prisma.santri.findUnique({ where: { santriId: data.santriId } }),
         ]);
         let duplicateType = null;
         let duplicateValue = '';
@@ -95,12 +92,11 @@ async function validateImportData(rows: any[], preview: boolean = false) {
         } else if (existingEmail) {
           duplicateType = 'email';
           duplicateValue = data.email;
-        } else if (existingSantri) {
-          duplicateType = 'santriId';
-          duplicateValue = data.santriId;
         }
 
-        validData.push({ ...data, rowNumber: i + 2, duplicateType });
+        // Generate NIS untuk preview
+        const nis = await generateNIS();
+        validData.push({ ...data, santriId: nis, rowNumber: i + 2, duplicateType });
         if (duplicateType) {
           failed++;
           errors.push({ row: i + 2, message: `Duplikat pada ${duplicateType}: ${duplicateValue}` });
@@ -137,18 +133,8 @@ async function validateImportData(rows: any[], preview: boolean = false) {
           continue;
         }
 
-        // Cek duplikasi santriId
-        const existingSantri = await prisma.santri.findUnique({ 
-          where: { santriId: data.santriId } 
-        });
-        if (existingSantri) {
-          failed++;
-          errors.push({ 
-            row: i + 2, 
-            message: `ID Santri sudah ada: ${data.santriId}` 
-          });
-          continue;
-        }
+        // Generate NIS otomatis
+        const nis = await generateNIS();
 
         // Cari tahun ajaran terlebih dahulu
         const tahunAjaran = await prisma.tahunAjaran.findFirst({
@@ -219,7 +205,7 @@ async function validateImportData(rows: any[], preview: boolean = false) {
           data: {
             userId: user.id,
             name: data.name,
-            santriId: data.santriId,
+            santriId: nis,
             kelasId: kelas.id,
             phone: data.phone || null,
             namaBapak: data.namaBapak || null,
@@ -466,19 +452,10 @@ export async function POST(req: Request) {
           });
           continue;
         }
-        // Cek duplikasi santriId
-        const existingSantri = await prisma.santri.findUnique({ 
-          where: { santriId: data.santriId } 
-        });
-        if (existingSantri) {
-          console.log('SantriId sudah ada:', data.santriId);
-          failed++;
-          errors.push({ 
-            row: i + 2, 
-            message: `ID Santri sudah ada: ${data.santriId}` 
-          });
-          continue;
-        }
+
+        // Generate NIS otomatis
+        const nis = await generateNIS();
+
         // Cari tahun ajaran terlebih dahulu
         const tahunAjaran = await prisma.tahunAjaran.findFirst({
           where: {
@@ -545,7 +522,7 @@ export async function POST(req: Request) {
           data: {
             userId: user.id,
             name: data.name,
-            santriId: data.santriId,
+            santriId: nis,
             kelasId: kelas.id,
             phone: data.phone || null,
             namaBapak: data.namaBapak || null,

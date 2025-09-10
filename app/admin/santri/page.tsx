@@ -80,6 +80,7 @@ import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { ExportButtons } from "@/components/ui/export-buttons";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { generateNIS } from "@/lib/nis-generator";
 
 interface Santri {
   id: string;
@@ -109,10 +110,7 @@ interface Kelas {
 
 const santriFormSchema = z.object({
   name: z.string().min(1, "Nama santri tidak boleh kosong"),
-  santriId: z.string()
-    .min(1, "ID Santri tidak boleh kosong")
-    .max(20, "ID Santri maksimal 20 karakter")
-    .regex(/^[A-Za-z0-9\-_]+$/, "ID Santri hanya boleh berisi huruf, angka, tanda hubung, dan underscore"),
+  santriId: z.string().optional(), // NIS akan dibuat otomatis
   kelasId: z.string().min(1, "Kelas harus dipilih"),
   phone: z.string().optional().transform(val => val === "" ? undefined : val),
   namaBapak: z.string().optional(),
@@ -170,7 +168,10 @@ export default function SantriPage() {
 
   const addSantriMutation = useMutation({
     mutationFn: async (data: { userData: z.infer<typeof userCreateFormSchema>, santriData: z.infer<typeof santriFormSchema> }) => {
-      // 1. Register user baru
+      // 1. Generate NIS otomatis
+      const nis = await generateNIS();
+      
+      // 2. Register user baru
       const userRes = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -180,11 +181,11 @@ export default function SantriPage() {
       if (!userResult.success) {
         throw new Error(userResult.message || "Gagal mendaftarkan user");
       }
-      // 2. Tambah data santri dengan userId hasil register
+      // 3. Tambah data santri dengan userId hasil register dan NIS otomatis
       const santriRes = await fetch("/api/santri", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...data.santriData, userId: userResult.user.id }),
+        body: JSON.stringify({ ...data.santriData, santriId: nis, userId: userResult.user.id }),
       });
       return santriRes.json();
     },
@@ -336,7 +337,6 @@ export default function SantriPage() {
     resolver: zodResolver(santriFormSchema),
     defaultValues: {
       name: "",
-      santriId: "",
       kelasId: "",
       phone: "",
       namaBapak: "",
@@ -358,7 +358,6 @@ export default function SantriPage() {
     if (editingSantri) {
       form.reset({
         name: editingSantri.name,
-        santriId: editingSantri.santriId,
         kelasId: editingSantri.kelas.id,
         phone: editingSantri.phone || "",
         namaBapak: editingSantri.namaBapak || "",
@@ -393,7 +392,6 @@ export default function SantriPage() {
             email: userUpdateData.email
           },
           name: values.name,
-          santriId: values.santriId,
           kelasId: values.kelasId,
           phone: values.phone,
           namaBapak: values.namaBapak,
@@ -423,7 +421,6 @@ export default function SantriPage() {
             email: userValues.email,
             password: userValues.password,
             name: values.name,
-            santriId: values.santriId,
             kelasId: values.kelasId,
             phone: values.phone,
             namaBapak: values.namaBapak,
@@ -454,7 +451,6 @@ export default function SantriPage() {
     setEditingSantri(null);
     form.reset({
       name: "",
-      santriId: "",
       kelasId: "",
       phone: "",
       namaBapak: "",
@@ -493,7 +489,6 @@ export default function SantriPage() {
     setEditingSantri(null);
     form.reset({
       name: "",
-      santriId: "",
       kelasId: "",
       phone: "",
       namaBapak: "",
@@ -879,22 +874,6 @@ export default function SantriPage() {
                 />
                 <FormField
                   control={form.control}
-                  name="santriId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>ID Santri</FormLabel>
-                      <FormControl>
-                        <Input placeholder="S001" {...field} />
-                      </FormControl>
-                      <FormDescription>
-                        Masukkan ID Santri sesuai format yang diinginkan (contoh: S001, 2024001, dll). ID harus unik dan tidak boleh kosong.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
                   name="kelasId"
                   render={({ field }) => (
                     <FormItem>
@@ -1084,7 +1063,7 @@ export default function SantriPage() {
           <DialogHeader>
             <DialogTitle>Import Data Santri</DialogTitle>
             <DialogDescription>
-              Upload file CSV atau Excel untuk mengimport data santri. Anda dapat preview data terlebih dahulu sebelum melakukan import.
+              Upload file CSV atau Excel untuk mengimport data santri. NIS (Nomor Induk Santri) akan dibuat otomatis dengan format tahun masuk + nomor urut. Anda dapat preview data terlebih dahulu sebelum melakukan import.
             </DialogDescription>
           </DialogHeader>
           <ScrollArea className="max-h-[60vh]">
@@ -1137,14 +1116,26 @@ export default function SantriPage() {
             </div>
               
               <div className="mb-4">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-                  onChange={handleFileSelect}
-                  disabled={importing || previewing}
-                  className="mb-2"
-                />
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
+              <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                onChange={handleFileSelect}
+                disabled={importing || previewing}
+                className="mb-2 w-full"
+              />
+              <p className="text-sm text-gray-500 mt-2">
+                Pilih file CSV atau Excel untuk mengimport data santri
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Format yang didukung: .csv, .xlsx, .xls
+              </p>
+              <p className="text-xs text-blue-600 mt-1 font-medium">
+                NIS akan dibuat otomatis (contoh: 25.001, 25.002, dst.)
+              </p>
+            </div>
                 {selectedFile && (
                   <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
                     <div className="text-sm text-muted-foreground">
