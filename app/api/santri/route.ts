@@ -3,14 +3,12 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
+import { generateNIS } from "@/lib/nis-generator";
 
 const santriSchema = z.object({
   userId: z.string().uuid(),
   name: z.string().min(1, "Nama santri tidak boleh kosong"),
-  santriId: z.string()
-    .min(1, "ID Santri tidak boleh kosong")
-    .max(20, "ID Santri maksimal 20 karakter")
-    .regex(/^[A-Za-z0-9\-_]+$/, "ID Santri hanya boleh berisi huruf, angka, tanda hubung, dan underscore"),
+  santriId: z.string().optional(), // NIS akan dibuat otomatis jika tidak ada
   kelasId: z.string().uuid("Pilih kelas yang valid"),
   phone: z.string().optional().transform(val => val === "" ? undefined : val),
   namaBapak: z.string().optional(),
@@ -118,23 +116,14 @@ export async function POST(req: Request) {
     const validatedData = santriSchema.parse(body);
     console.log("Data yang sudah divalidasi:", validatedData);
 
-    // Cek apakah ID Santri sudah digunakan
-    const existingSantriId = await prisma.santri.findUnique({
-      where: { santriId: validatedData.santriId },
-    });
-
-    if (existingSantriId) {
-      return NextResponse.json(
-        { message: "ID Santri sudah digunakan" },
-        { status: 400 }
-      );
-    }
+    // Generate NIS otomatis jika tidak ada
+    const nis = validatedData.santriId || await generateNIS();
 
     const newSantri = await prisma.santri.create({
       data: {
         userId: validatedData.userId,
         name: validatedData.name,
-        santriId: validatedData.santriId,
+        santriId: nis,
         kelasId: validatedData.kelasId,
         phone: validatedData.phone,
         namaBapak: validatedData.namaBapak,
